@@ -13,25 +13,36 @@ from tools.semgrep_tool import run_semgrep
 
 def run_pipeline():
 
-    # Get real findings from Semgrep
-    raw_findings = run_semgrep(
-        "data/BenchmarkPython/testcode",
-        "auto"
-    )
+    # Day 6 Check: Verify Semgrep integration
+    raw_findings = run_semgrep("data/BenchmarkPython")
 
     print(
         f"Semgrep found {len(raw_findings)} findings"
     )
 
-    # Process only first 5 findings for testing
+    # Keep using test findings for now
     findings = [
-        SemgrepFinding(**f)
-        for f in raw_findings[:5]
-    ]
 
-    print(
-        f"Processing {len(findings)} findings"
-    )
+        SemgrepFinding(
+            finding_id="F001",
+            file="data/BenchmarkPython/testcode/BenchmarkTest00001.py",
+            line=47,
+            rule_id="test-rule",
+            cwe_tag="CWE-022",
+            severity="HIGH",
+            snippet="codecs.open(...)"
+        ),
+
+        SemgrepFinding(
+            finding_id="F002",
+            file="data/BenchmarkPython/testcode/BenchmarkTest00001.py",
+            line=39,
+            rule_id="test-rule",
+            cwe_tag="CWE-022",
+            severity="MEDIUM",
+            snippet="request.cookies(...)"
+        )
+    ]
 
     for finding in findings:
 
