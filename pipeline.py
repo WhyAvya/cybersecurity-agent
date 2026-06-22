@@ -13,7 +13,6 @@ from tools.semgrep_tool import run_semgrep
 
 def run_pipeline():
 
-    # Get real findings from Semgrep
     raw_findings = run_semgrep(
         "data/BenchmarkPython/testcode",
         "auto"
@@ -23,10 +22,9 @@ def run_pipeline():
         f"Semgrep found {len(raw_findings)} findings"
     )
 
-    # Process only first 5 findings for testing
     findings = [
         SemgrepFinding(**f)
-        for f in raw_findings[:5]
+        for f in raw_findings[:50]
     ]
 
     print(
