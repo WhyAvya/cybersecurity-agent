@@ -24,7 +24,7 @@ def run_pipeline():
 
     findings = [
         SemgrepFinding(**f)
-        for f in raw_findings[:50]
+        for f in raw_findings[:1]
     ]
 
     print(
@@ -34,16 +34,18 @@ def run_pipeline():
     for finding in findings:
 
         try:
-
+            print("Running Scanner...")
             context = run_scanner(
                 finding
             )
-
+            
+            print("Running Analyzer...")
             analysis = run_analyzer(
                 finding,
                 context
             )
-
+            
+            print("Running Reporter...")
             report = run_reporter(
                 finding,
                 analysis

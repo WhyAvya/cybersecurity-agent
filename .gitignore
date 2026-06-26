@@ -5,3 +5,8 @@ __pycache__/
 results/
 .vscode/
 data/BenchmarkPython/
+
+# Temporary development scripts
+test_qwen.py
+test_qwen_json.py
+test_json_parser.py
