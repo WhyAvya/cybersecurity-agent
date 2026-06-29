@@ -5,8 +5,7 @@ You will receive a structured summary from the scanner agent.
 
 Your task (ReAct loop, max 3 iterations):
 1. THOUGHT: Form a hypothesis about whether this is a real vulnerability
-2. ACTION: Use the check_data_flow tool to trace how user input 
-   reaches the flagged location
+2. ACTION: Use the available code context and any available analysis tools to determine whether user-controlled input reaches the vulnerable sink.
 3. OBSERVATION: Examine the tool result
 4. DECISION: Is this a true positive (TP) or false positive (FP)?
 

@@ -11,7 +11,7 @@ from logger.jsonl_logger import log_verdict, log_failure
 from tools.semgrep_tool import run_semgrep
 
 
-def run_pipeline():
+def run_pipeline(num_findings=50):
 
     raw_findings = run_semgrep(
         "data/BenchmarkPython/testcode",
@@ -24,7 +24,7 @@ def run_pipeline():
 
     findings = [
         SemgrepFinding(**f)
-        for f in raw_findings[:1]
+        for f in raw_findings[:num_findings]
     ]
 
     print(
@@ -34,17 +34,18 @@ def run_pipeline():
     for finding in findings:
 
         try:
+
             print("Running Scanner...")
             context = run_scanner(
                 finding
             )
-            
+
             print("Running Analyzer...")
             analysis = run_analyzer(
                 finding,
                 context
             )
-            
+
             print("Running Reporter...")
             report = run_reporter(
                 finding,
@@ -97,7 +98,9 @@ def run_pipeline():
             print(
                 f"Pipeline error: {finding.finding_id}"
             )
+            print(e)
 
 
 if __name__ == "__main__":
-    run_pipeline()
+
+    run_pipeline(num_findings=50)
