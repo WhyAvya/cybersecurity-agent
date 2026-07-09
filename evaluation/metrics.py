@@ -1,8 +1,36 @@
 # evaluation/metrics.py
 
+import re
+
+
+def normalize_cwe(cwe_text):
+    """
+    Normalize CWE formats:
+    CWE-79  -> CWE-079
+    CWE-22  -> CWE-022
+    CWE-611 -> CWE-611
+    CWE-611: description -> CWE-611
+    """
+
+    if not cwe_text:
+        return "NONE"
+
+    match = re.search(r"CWE[-_]?(\d+)", str(cwe_text), re.IGNORECASE)
+
+    if not match:
+        return "NONE"
+
+    return f"CWE-{int(match.group(1)):03d}"
+
+
 def evaluate(grouped_findings, ground_truth, benchmark_cwes):
     """
-    Evaluate predictions against the benchmark.
+    Evaluate Semgrep or agent predictions against benchmark ground truth.
+
+    This evaluates:
+    - vulnerable file detected or missed
+    - false positives on non-vulnerable files
+    - CWE match for vulnerable files
     """
 
     tp = 0
@@ -10,42 +38,40 @@ def evaluate(grouped_findings, ground_truth, benchmark_cwes):
     fn = 0
     tn = 0
 
+    normalized_benchmark_cwes = {
+        normalize_cwe(cwe) for cwe in benchmark_cwes
+    }
+
     for test_id, truth in ground_truth.items():
 
         findings = grouped_findings.get(test_id, [])
 
-        expected_cwe = truth["cwe"]
+        expected_cwe = normalize_cwe(truth["cwe"])
 
-        found_match = False
+        valid_findings = []
 
         for finding in findings:
+            predicted_cwe = normalize_cwe(finding.get("cwe_tag", ""))
 
-            semgrep_cwe = (
-                finding["cwe_tag"]
-                .split(":")[0]
-                .strip()
-            )
+            if predicted_cwe in normalized_benchmark_cwes:
+                valid_findings.append(predicted_cwe)
 
-            if semgrep_cwe not in benchmark_cwes:
-                continue
-
-            if semgrep_cwe == expected_cwe:
-                found_match = True
-                break
+        has_valid_finding = len(valid_findings) > 0
+        has_correct_cwe = expected_cwe in valid_findings
 
         if truth["vulnerable"]:
 
-            if found_match:
+            if has_correct_cwe:
                 tp += 1
             else:
                 fn += 1
 
         else:
 
-            if len(findings) == 0:
-                tn += 1
-            else:
+            if has_valid_finding:
                 fp += 1
+            else:
+                tn += 1
 
     return {
         "tp": tp,
@@ -55,9 +81,9 @@ def evaluate(grouped_findings, ground_truth, benchmark_cwes):
     }
 
 
-def print_metrics(results):
+def calculate_metrics(results):
     """
-    Print evaluation metrics.
+    Calculate precision, recall, F1, and false positive rate.
     """
 
     tp = results["tp"]
@@ -75,14 +101,37 @@ def print_metrics(results):
 
     fpr = fp / (fp + tn) if (fp + tn) else 0
 
-    print("\n===== SEMGREP BASELINE =====")
-    print(f"True Positives : {tp}")
-    print(f"False Positives: {fp}")
-    print(f"False Negatives: {fn}")
-    print(f"True Negatives : {tn}")
+    return {
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "fpr": fpr
+    }
+
+
+def print_metrics(results, title="RESULTS"):
+    """
+    Print evaluation metrics.
+    """
+
+    metrics = calculate_metrics(results)
+
+    print(f"\n===== {title} =====")
+
+    print(f"True Positives : {results['tp']}")
+    print(f"False Positives: {results['fp']}")
+    print(f"False Negatives: {results['fn']}")
+    print(f"True Negatives : {results['tn']}")
 
     print("\n===== METRICS =====")
-    print(f"Precision : {precision:.3f}")
-    print(f"Recall    : {recall:.3f}")
-    print(f"F1 Score  : {f1:.3f}")
-    print(f"FPR       : {fpr:.3f}")
+
+    print(f"Precision : {metrics['precision']:.3f}")
+    print(f"Recall    : {metrics['recall']:.3f}")
+    print(f"F1 Score  : {metrics['f1']:.3f}")
+    print(f"FPR       : {metrics['fpr']:.3f}")
+
+
+if __name__ == "__main__":
+    print("metrics.py contains reusable evaluation functions.")
+    print("Run this instead:")
+    print("python -m evaluation.semgrep_baseline")

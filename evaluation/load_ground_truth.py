@@ -40,6 +40,14 @@ if __name__ == "__main__":
     )
 
     print(f"Loaded {len(ground_truth)} benchmark entries")
+    benchmark_cwes = sorted(
+    {entry["cwe"] for entry in ground_truth.values()}
+)
+
+    print("\nBenchmark CWEs:")
+    print(benchmark_cwes)
+
+    
 
     print("\nExample entry:")
     print(ground_truth["BenchmarkTest00001"])
