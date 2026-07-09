@@ -15,3 +15,11 @@ create_project_audit.py
 project_audit_snapshot.txt
 project_code_snapshot.txt
 project_structure.txt
+
+# Generated scan reports
+reports/*.jsonl
+reports/*.md
+
+# Generated scan reports
+reports/*.jsonl
+reports/*.md
