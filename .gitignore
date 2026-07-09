@@ -10,3 +10,8 @@ data/BenchmarkPython/
 test_qwen.py
 test_qwen_json.py
 test_json_parser.py
+# Local audit/snapshot files
+create_project_audit.py
+project_audit_snapshot.txt
+project_code_snapshot.txt
+project_structure.txt
