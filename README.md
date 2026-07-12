@@ -1,4 +1,4 @@
-# Agentic Workflow for Source Code Vulnerability Discovery and Analysis
+﻿# Agentic Workflow for Source Code Vulnerability Discovery and Analysis
 
 
 
@@ -188,113 +188,113 @@ The main components are:
 
 cybersecurity-agent/
 
-│
+â”‚
 
-├── agents/
+â”œâ”€â”€ agents/
 
-│   ├── analyzer_agent.py
+â”‚   â”œâ”€â”€ analyzer_agent.py
 
-│   ├── llm_baseline_agent.py
+â”‚   â”œâ”€â”€ llm_baseline_agent.py
 
-│   ├── reporter_agent.py
+â”‚   â”œâ”€â”€ reporter_agent.py
 
-│   └── scanner_agent.py
+â”‚   â””â”€â”€ scanner_agent.py
 
-│
+â”‚
 
-├── evaluation/
+â”œâ”€â”€ evaluation/
 
-│   ├── compare_hybrid_fair.py
+â”‚   â”œâ”€â”€ compare_hybrid_fair.py
 
-│   ├── hybrid_baseline.py
+â”‚   â”œâ”€â”€ hybrid_baseline.py
 
-│   ├── hybrid_policy_analysis.py
+â”‚   â”œâ”€â”€ hybrid_policy_analysis.py
 
-│   ├── llm_baseline.py
+â”‚   â”œâ”€â”€ llm_baseline.py
 
-│   ├── load_ground_truth.py
+â”‚   â”œâ”€â”€ load_ground_truth.py
 
-│   ├── metrics.py
+â”‚   â”œâ”€â”€ metrics.py
 
-│   ├── semgrep_baseline.py
+â”‚   â”œâ”€â”€ semgrep_baseline.py
 
-│   ├── week5_consistency_test.py
+â”‚   â”œâ”€â”€ week5_consistency_test.py
 
-│   ├── week5_failure_analysis.py
+â”‚   â”œâ”€â”€ week5_failure_analysis.py
 
-│   ├── week5_generate_report.py
+â”‚   â”œâ”€â”€ week5_generate_report.py
 
-│   ├── week5_prompt_sensitivity.py
+â”‚   â”œâ”€â”€ week5_prompt_sensitivity.py
 
-│   └── week5_trustworthiness_report.md
+â”‚   â””â”€â”€ week5_trustworthiness_report.md
 
-│
+â”‚
 
-├── llm/
+â”œâ”€â”€ llm/
 
-│   └── ollama_client.py
+â”‚   â””â”€â”€ ollama_client.py
 
-│
+â”‚
 
-├── prompts/
+â”œâ”€â”€ prompts/
 
-│   ├── analyzer_prompt.txt
+â”‚   â”œâ”€â”€ analyzer_prompt.txt
 
-│   ├── llm_baseline_prompt.txt
+â”‚   â”œâ”€â”€ llm_baseline_prompt.txt
 
-│   ├── reporter_prompt.txt
+â”‚   â”œâ”€â”€ reporter_prompt.txt
 
-│   └── scanner_prompt.txt
+â”‚   â””â”€â”€ scanner_prompt.txt
 
-│
+â”‚
 
-├── reports/
+â”œâ”€â”€ reports/
 
-│   └── generated scan reports
+â”‚   â””â”€â”€ generated scan reports
 
-│
+â”‚
 
-├── results/
+â”œâ”€â”€ results/
 
-│   └── generated benchmark and analysis outputs
+â”‚   â””â”€â”€ generated benchmark and analysis outputs
 
-│
+â”‚
 
-├── schemas/
+â”œâ”€â”€ schemas/
 
-│   └── verdict.py
+â”‚   â””â”€â”€ verdict.py
 
-│
+â”‚
 
-├── test_projects/
+â”œâ”€â”€ test_projects/
 
-│   └── vulnerable_app/
+â”‚   â””â”€â”€ vulnerable_app/
 
-│       └── app.py
+â”‚       â””â”€â”€ app.py
 
-│
+â”‚
 
-├── tools/
+â”œâ”€â”€ tools/
 
-│   ├── context_fetcher.py
+â”‚   â”œâ”€â”€ context_fetcher.py
 
-│   ├── cwe_lookup.py
+â”‚   â”œâ”€â”€ cwe_lookup.py
 
-│   ├── prompt_loader.py
+â”‚   â”œâ”€â”€ prompt_loader.py
 
-│   └── semgrep_tool.py
+â”‚   â””â”€â”€ semgrep_tool.py
 
-│
+â”‚
 
-├── scan.py
+â”œâ”€â”€ scan.py
 
-├── pipeline.py
+â”œâ”€â”€ pipeline.py
 
-├── evaluate_results.py
+â”œâ”€â”€ evaluate_results.py
 
-├── README.md
+â”œâ”€â”€ README.md
 
-└── .gitignore
+â””â”€â”€ .gitignore
 
 ```
 
@@ -336,7 +336,7 @@ python -m venv venv
 
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 
-.venvScriptsActivate.ps1
+.\venv\Scripts\Activate.ps1
 
 ```
 
@@ -948,7 +948,7 @@ This allows the user to scan any Python file or folder.
 
 ```powershell
 
-python scan.py test_projectsvulnerable_app
+python scan.py test_projects\vulnerable_app
 
 ```
 
@@ -962,7 +962,7 @@ Expected output:
 
 ===== REAL SCAN MODE =====
 
-Target path: test_projectsvulnerable_app
+Target path: test_projects\vulnerable_app
 
 Semgrep config: auto
 
@@ -982,9 +982,9 @@ Rejected             : 1
 
 Needs review         : 3
 
-JSONL report saved   : reportsscan_report_<timestamp>.jsonl
+JSONL report saved   : reports\scan_report_<timestamp>.jsonl
 
-Markdown report saved: reportsscan_report_<timestamp>.md
+Markdown report saved: reports\scan_report_<timestamp>.md
 
 ```
 
@@ -996,7 +996,7 @@ Markdown report saved: reportsscan_report_<timestamp>.md
 
 ```powershell
 
-python scan.py pathtoyourpython_project
+python scan.py path\to\your\python_project
 
 ```
 
@@ -1008,7 +1008,7 @@ Example:
 
 ```powershell
 
-python scan.py test_projectsvulnerable_app
+python scan.py test_projects\vulnerable_app
 
 ```
 
@@ -1020,7 +1020,7 @@ python scan.py test_projectsvulnerable_app
 
 ```powershell
 
-python scan.py test_projectsvulnerable_app --config auto
+python scan.py test_projects\vulnerable_app --config auto
 
 ```
 
@@ -1032,7 +1032,7 @@ or:
 
 ```powershell
 
-python scan.py test_projectsvulnerable_app --config p/python
+python scan.py test_projects\vulnerable_app --config p/python
 
 ```
 
@@ -1080,7 +1080,7 @@ Each line contains one finding:
 
 &#x20; "status": "ACCEPTED",
 
-&#x20; "file": "test_projectsvulnerable_appapp.py",
+&#x20; "file": "test_projects\vulnerable_app\app.py",
 
 &#x20; "line": 13,
 
@@ -1214,7 +1214,7 @@ Run:
 
 ```powershell
 
-python scan.py test_projectsvulnerable_app
+python scan.py test_projects\vulnerable_app
 
 ```
 
@@ -1512,7 +1512,7 @@ This makes the project suitable as a research prototype and demo-ready vulnerabi
 
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 
-.venvScriptsActivate.ps1
+.\venv\Scripts\Activate.ps1
 
 ```
 
@@ -1590,7 +1590,7 @@ python -m evaluation.week5_generate_report
 
 ```powershell
 
-python scan.py test_projectsvulnerable_app
+python scan.py test_projects\vulnerable_app
 
 ```
 
@@ -1602,7 +1602,7 @@ python scan.py test_projectsvulnerable_app
 
 ```powershell
 
-notepad (Get-ChildItem reports*.md | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+notepad (Get-ChildItem reports\*.md | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 
 ```
 
@@ -1614,7 +1614,7 @@ notepad (Get-ChildItem reports*.md | Sort-Object LastWriteTime -Descending | Sel
 
 ```powershell
 
-notepad (Get-ChildItem reports*.jsonl | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+notepad (Get-ChildItem reports\*.jsonl | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 
 ```
 
@@ -1650,3 +1650,83 @@ Major completed milestones:
 
 - Week 6 real scan mode
 
+
+---
+
+## 18. Real Scan Mode Demo Results
+
+In Week 6, the system was extended from benchmark-only evaluation to real project scan mode. The scanner can now analyze Python source code from three types of targets:
+
+1. A single Python source-code file.
+2. A folder containing multiple Python files.
+3. An external Python folder outside the repository using an absolute path.
+
+Each scan produces a JSONL report, a Markdown report, and one of three status labels for each finding: `ACCEPTED`, `REJECTED`, or `NEEDS_REVIEW`.
+
+The `NEEDS_REVIEW` status is used when the model output appears uncertain or contradictory. This supports a human-in-the-loop workflow instead of blindly trusting every LLM verdict.
+
+### 18.1 Single File Scan Demo
+
+Command: `python scan.py test_projects\single_file_test\vulnerable_single.py`
+
+| Metric | Value |
+|---|---:|
+| Raw Semgrep findings | 12 |
+| Accepted vulnerabilities | 9 |
+| Needs human review | 2 |
+| Rejected findings | 1 |
+
+| Evaluation mode | Precision | Recall | F1 Score |
+|---|---:|---:|---:|
+| Strict accepted-only | 100.0% | 75.0% | 85.7% |
+| Accepted + needs-review | 100.0% | 91.7% | 95.7% |
+
+CWE category-level result: `CWE-022`, `CWE-078`, and `CWE-089` were all detected.
+
+### 18.2 Multi-File Folder Scan Demo
+
+Command: `python scan.py test_projects\multi_file_app`
+
+Latest scan result:
+
+| Metric | Value |
+|---|---:|
+| Raw Semgrep findings | 11 |
+| Accepted vulnerabilities | 11 |
+| Needs human review | 0 |
+| Rejected findings | 0 |
+
+| Evaluation mode | Precision | Recall | F1 Score |
+|---|---:|---:|---:|
+| Strict accepted-only | 100.0% | 100.0% | 100.0% |
+| Accepted + needs-review | 100.0% | 100.0% | 100.0% |
+
+CWE category-level result: `CWE-022`, `CWE-078`, and `CWE-089` were all detected.
+
+### 18.3 External Folder Scan Demo
+
+Command: `python scan.py C:\Users\sharm\Documents\ExternalPythonTest`
+
+Latest scan result:
+
+| Metric | Value |
+|---|---:|
+| Raw Semgrep findings | 12 |
+| Accepted vulnerabilities | 6 |
+| Needs human review | 5 |
+| Rejected findings | 1 |
+
+| Evaluation mode | Precision | Recall | F1 Score |
+|---|---:|---:|---:|
+| Strict accepted-only | 100.0% | 50.0% | 66.7% |
+| Accepted + needs-review | 100.0% | 91.7% | 95.7% |
+
+CWE category-level result: `CWE-022`, `CWE-078`, and `CWE-089` were all detected.
+
+### 18.4 Interpretation
+
+These demo results show that real scan mode works across single-file, multi-file, and external-path targets. The system successfully detected the intended vulnerability categories: path traversal, OS command injection, and SQL injection.
+
+The demo-level F1 scores are useful for validating the real scan workflow, but they should not be compared directly with the Week 4 benchmark metrics. These demo files are intentionally vulnerable and do not contain a balanced set of safe and vulnerable examples. Therefore, false positive rate is not meaningful for these demo scans.
+
+The main value of these tests is to demonstrate that the project has moved from benchmark evaluation to practical source-code scanning with structured reports and human review support.
