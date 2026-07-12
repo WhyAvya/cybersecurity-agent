@@ -1,4 +1,4 @@
-﻿# Agentic Workflow for Source Code Vulnerability Discovery and Analysis
+# Agentic Workflow for Source Code Vulnerability Discovery and Analysis
 
 
 
@@ -15,15 +15,10 @@ The system combines:
 
 
 - **Semgrep** for static application security testing
-
 - **Qwen2.5-Coder 7B** running locally through **Ollama**
-
 - A multi-agent analysis workflow
-
 - Benchmark-based evaluation
-
 - Trustworthiness and failure analysis
-
 - Real project scan mode with JSONL and Markdown reports
 
 
@@ -45,33 +40,19 @@ The project was developed as a research-oriented cybersecurity prototype and lat
 
 
 - Semgrep-based vulnerability scanning
-
 - Local open-source LLM reasoning using Qwen2.5-Coder
-
 - Agentic workflow with scanner, analyzer, and reporter components
-
 - Benchmark evaluation using labeled vulnerability data
-
 - Semgrep-only baseline
-
 - LLM-only baseline
-
 - Hybrid Semgrep + LLM baseline
-
 - Hybrid policy analysis
-
 - False positive and false negative analysis
-
 - Failure taxonomy generation
-
 - Consistency testing
-
 - Prompt sensitivity testing
-
 - Real project scan mode using `scan.py`
-
 - JSONL and Markdown vulnerability reports
-
 - Human-review routing using `NEEDS_REVIEW`
 
 
@@ -92,52 +73,47 @@ The project uses a staged agentic pipeline.
 
 Source Code / Benchmark Dataset
 
-&#x20;       |
+        |
 
-&#x20;       v
+        v
 
 Semgrep Static Analysis
 
-&#x20;       |
+        |
 
-&#x20;       v
+        v
 
 Scanner Agent
 
 - Reads Semgrep finding
-
 - Fetches surrounding code context
 
-&#x20;       |
+        |
 
-&#x20;       v
+        v
 
 Analyzer Agent
 
 - Sends finding + context to Qwen2.5-Coder
-
 - Classifies finding as TP, FP, or UNCERTAIN
-
 - Produces confidence and reasoning
 
-&#x20;       |
+        |
 
-&#x20;       v
+        v
 
 Reporter Agent
 
 - Assigns priority
-
 - Produces structured output
 
-&#x20;       |
+        |
 
-&#x20;       v
+        v
 
 Evaluation / Report Generation
 
 - Metrics for benchmark mode
-
 - JSONL + Markdown reports for real scan mode
 
 ```
@@ -153,25 +129,15 @@ The main components are:
 
 
 | Component | Purpose |
-
 |---|---|
-
 | `tools/semgrep_tool.py` | Runs Semgrep and extracts findings |
-
 | `tools/context_fetcher.py` | Fetches surrounding source-code context |
-
 | `agents/scanner_agent.py` | Prepares Semgrep findings for analysis |
-
 | `agents/analyzer_agent.py` | Uses Qwen2.5-Coder to classify findings |
-
 | `agents/reporter_agent.py` | Adds priority and final report metadata |
-
 | `evaluation/` | Contains benchmark evaluation and trustworthiness scripts |
-
 | `scan.py` | Runs real project scan mode |
-
 | `reports/` | Stores generated scan reports |
-
 | `test_projects/vulnerable_app/` | Sample vulnerable app for demo |
 
 
@@ -187,115 +153,61 @@ The main components are:
 ```text
 
 cybersecurity-agent/
-
-â”‚
-
-â”œâ”€â”€ agents/
-
-â”‚   â”œâ”€â”€ analyzer_agent.py
-
-â”‚   â”œâ”€â”€ llm_baseline_agent.py
-
-â”‚   â”œâ”€â”€ reporter_agent.py
-
-â”‚   â””â”€â”€ scanner_agent.py
-
-â”‚
-
-â”œâ”€â”€ evaluation/
-
-â”‚   â”œâ”€â”€ compare_hybrid_fair.py
-
-â”‚   â”œâ”€â”€ hybrid_baseline.py
-
-â”‚   â”œâ”€â”€ hybrid_policy_analysis.py
-
-â”‚   â”œâ”€â”€ llm_baseline.py
-
-â”‚   â”œâ”€â”€ load_ground_truth.py
-
-â”‚   â”œâ”€â”€ metrics.py
-
-â”‚   â”œâ”€â”€ semgrep_baseline.py
-
-â”‚   â”œâ”€â”€ week5_consistency_test.py
-
-â”‚   â”œâ”€â”€ week5_failure_analysis.py
-
-â”‚   â”œâ”€â”€ week5_generate_report.py
-
-â”‚   â”œâ”€â”€ week5_prompt_sensitivity.py
-
-â”‚   â””â”€â”€ week5_trustworthiness_report.md
-
-â”‚
-
-â”œâ”€â”€ llm/
-
-â”‚   â””â”€â”€ ollama_client.py
-
-â”‚
-
-â”œâ”€â”€ prompts/
-
-â”‚   â”œâ”€â”€ analyzer_prompt.txt
-
-â”‚   â”œâ”€â”€ llm_baseline_prompt.txt
-
-â”‚   â”œâ”€â”€ reporter_prompt.txt
-
-â”‚   â””â”€â”€ scanner_prompt.txt
-
-â”‚
-
-â”œâ”€â”€ reports/
-
-â”‚   â””â”€â”€ generated scan reports
-
-â”‚
-
-â”œâ”€â”€ results/
-
-â”‚   â””â”€â”€ generated benchmark and analysis outputs
-
-â”‚
-
-â”œâ”€â”€ schemas/
-
-â”‚   â””â”€â”€ verdict.py
-
-â”‚
-
-â”œâ”€â”€ test_projects/
-
-â”‚   â””â”€â”€ vulnerable_app/
-
-â”‚       â””â”€â”€ app.py
-
-â”‚
-
-â”œâ”€â”€ tools/
-
-â”‚   â”œâ”€â”€ context_fetcher.py
-
-â”‚   â”œâ”€â”€ cwe_lookup.py
-
-â”‚   â”œâ”€â”€ prompt_loader.py
-
-â”‚   â””â”€â”€ semgrep_tool.py
-
-â”‚
-
-â”œâ”€â”€ scan.py
-
-â”œâ”€â”€ pipeline.py
-
-â”œâ”€â”€ evaluate_results.py
-
-â”œâ”€â”€ README.md
-
-â””â”€â”€ .gitignore
-
+|
++-- agents/
+|   +-- analyzer_agent.py
+|   +-- llm_baseline_agent.py
+|   +-- reporter_agent.py
+|   `-- scanner_agent.py
+|
++-- evaluation/
+|   +-- compare_hybrid_fair.py
+|   +-- hybrid_baseline.py
+|   +-- hybrid_policy_analysis.py
+|   +-- llm_baseline.py
+|   +-- load_ground_truth.py
+|   +-- metrics.py
+|   +-- semgrep_baseline.py
+|   +-- week5_consistency_test.py
+|   +-- week5_failure_analysis.py
+|   +-- week5_generate_report.py
+|   +-- week5_prompt_sensitivity.py
+|   `-- week5_trustworthiness_report.md
+|
++-- llm/
+|   `-- ollama_client.py
+|
++-- prompts/
+|   +-- analyzer_prompt.txt
+|   +-- llm_baseline_prompt.txt
+|   +-- reporter_prompt.txt
+|   `-- scanner_prompt.txt
+|
++-- reports/
+|   `-- generated scan reports
+|
++-- results/
+|   `-- generated benchmark and analysis outputs
+|
++-- schemas/
+|   `-- verdict.py
+|
++-- test_projects/
+|   +-- vulnerable_app/
+|   +-- single_file_test/
+|   `-- multi_file_app/
+|
++-- tools/
+|   +-- context_fetcher.py
+|   +-- cwe_lookup.py
+|   +-- prompt_loader.py
+|   `-- semgrep_tool.py
+|
++-- scan.py
++-- pipeline.py
++-- evaluate_results.py
++-- README.md
+`-- .gitignore
 ```
 
 
@@ -691,17 +603,11 @@ results/hybrid_policy_analysis.csv
 
 
 | System | Metric Type | Precision | Recall | F1 | FPR | Interpretation |
-
 |---|---:|---:|---:|---:|---:|---|
-
 | Semgrep only | Binary detection | 58.2% | 19.7% | 29.4% | 8.2% | Stable static-analysis baseline |
-
 | LLM only | Binary detection | 34.7% | 100.0% | 51.5% | 97.0% | High recall but excessive false positives |
-
 | Hybrid-Strict | Binary detection | 70.0% | 12.4% | 21.1% | 3.1% | Best precision and lowest false-positive rate |
-
 | Hybrid-Review | Binary detection | 64.9% | 13.5% | 22.3% | 4.2% | Treats uncertain cases as review |
-
 | Hybrid-Conf75 | Binary detection | 59.6% | 19.2% | 29.1% | 7.6% | Best balanced hybrid policy |
 
 
@@ -727,17 +633,11 @@ The analysis included:
 
 
 - False positives
-
 - False negatives
-
 - Failure taxonomy
-
 - Consistency testing
-
 - Prompt sensitivity testing
-
 - Hallucinated findings
-
 - Reasoning failures
 
 
@@ -847,13 +747,9 @@ Observed result:
 
 
 | Prompt Style | TP | FP | UNCERTAIN | Match Rate | Avg Confidence | Parse Success |
-
 |---|---:|---:|---:|---:|---:|---:|
-
 | Strict | 1 | 10 | 4 | 0.400 | 0.810 | 1.000 |
-
 | Balanced | 6 | 1 | 8 | 0.267 | 0.750 | 1.000 |
-
 | Recall-focused | 11 | 0 | 4 | 0.333 | 0.837 | 1.000 |
 
 
@@ -887,25 +783,15 @@ evaluation/week5_trustworthiness_report.md
 
 
 | Failure Type | Count |
-
 |---|---:|
-
 | TOOL_COVERAGE_GAP | 363 |
-
 | HIGH_CONFIDENCE_HALLUCINATION | 43 |
-
 | SANITIZATION_MISUNDERSTANDING | 41 |
-
 | CWE_MISMATCH | 26 |
-
 | FALSE_POSITIVE_FILTER_FAILURE | 23 |
-
 | SPECULATIVE_REASONING | 20 |
-
 | HIGH_CONFIDENCE_FALSE_POSITIVE | 8 |
-
 | UNCERTAINTY_MISCLASSIFICATION | 2 |
-
 | VULNERABLE_WITHOUT_VALID_CWE | 1 |
 
 
@@ -1076,27 +962,27 @@ Each line contains one finding:
 
 {
 
-&#x20; "scan_mode": "real_project_scan",
+  "scan_mode": "real_project_scan",
 
-&#x20; "status": "ACCEPTED",
+  "status": "ACCEPTED",
 
-&#x20; "file": "test_projects\vulnerable_app\app.py",
+  "file": "test_projects\vulnerable_app\app.py",
 
-&#x20; "line": 13,
+  "line": 13,
 
-&#x20; "rule_id": "python.lang.security.dangerous-system-call.dangerous-system-call",
+  "rule_id": "python.lang.security.dangerous-system-call.dangerous-system-call",
 
-&#x20; "cwe": "CWE-078: OS Command Injection",
+  "cwe": "CWE-078: OS Command Injection",
 
-&#x20; "severity": "HIGH",
+  "severity": "HIGH",
 
-&#x20; "analyzer_verdict": "TP",
+  "analyzer_verdict": "TP",
 
-&#x20; "confidence": 0.9,
+  "confidence": 0.9,
 
-&#x20; "priority": "HIGH",
+  "priority": "HIGH",
 
-&#x20; "reasoning": "The code contains a dangerous system call using user-controlled input..."
+  "reasoning": "The code contains a dangerous system call using user-controlled input..."
 
 }
 
@@ -1113,29 +999,17 @@ The Markdown report is human-readable and contains:
 
 
 - Scan summary
-
 - Number of raw Semgrep findings
-
 - Accepted vulnerabilities
-
 - Rejected findings
-
 - Findings needing human review
-
 - File and line number
-
 - Rule ID
-
 - CWE
-
 - Severity
-
 - Analyzer verdict
-
 - Confidence
-
 - Priority
-
 - LLM reasoning
 
 
@@ -1145,13 +1019,9 @@ The Markdown report is human-readable and contains:
 
 
 | Status | Meaning |
-
 |---|---|
-
 | `ACCEPTED` | The finding is likely a real vulnerability |
-
 | `REJECTED` | The finding is likely a false positive |
-
 | `NEEDS_REVIEW` | The finding is uncertain, contradictory, or unstable and should be reviewed by a human |
 
 
@@ -1165,13 +1035,9 @@ The `NEEDS_REVIEW` category was added based on Week 5 trustworthiness findings. 
 
 
 | Priority | Meaning |
-
 |---|---|
-
 | `HIGH` | Strong vulnerability signal with high severity and confidence |
-
 | `MEDIUM` | Needs attention or human review |
-
 | `LOW` | Low-confidence or rejected finding |
 
 
@@ -1201,9 +1067,7 @@ It contains examples of:
 
 
 - OS command injection
-
 - SQL injection
-
 - Path traversal
 
 
@@ -1248,15 +1112,15 @@ Used for research evaluation on labeled data.
 
 BenchmarkPython dataset
 
-&#x20;       |
+        |
 
-&#x20;       v
+        v
 
 Semgrep / LLM / Hybrid evaluation
 
-&#x20;       |
+        |
 
-&#x20;       v
+        v
 
 Metrics and trustworthiness analysis
 
@@ -1276,33 +1140,33 @@ Used for scanning an actual Python project.
 
 User Python project
 
-&#x20;       |
+        |
 
-&#x20;       v
+        v
 
 Semgrep scan
 
-&#x20;       |
+        |
 
-&#x20;       v
+        v
 
 Scanner agent
 
-&#x20;       |
+        |
 
-&#x20;       v
+        v
 
 Analyzer agent using Qwen2.5-Coder
 
-&#x20;       |
+        |
 
-&#x20;       v
+        v
 
 Reporter
 
-&#x20;       |
+        |
 
-&#x20;       v
+        v
 
 JSONL + Markdown report
 
@@ -1397,13 +1261,9 @@ Human review is recommended for:
 
 
 - `NEEDS_REVIEW` findings
-
 - High-impact vulnerabilities
-
 - Contradictory LLM reasoning
-
 - Low-confidence findings
-
 - Security-critical applications
 
 
@@ -1476,15 +1336,15 @@ The most reliable use case for this system is:
 
 Static analyzer finds candidate vulnerabilities
 
-&#x20;       |
+        |
 
-&#x20;       v
+        v
 
 LLM explains and prioritizes findings
 
-&#x20;       |
+        |
 
-&#x20;       v
+        v
 
 Human reviews accepted and uncertain cases
 
@@ -1645,9 +1505,7 @@ Major completed milestones:
 
 
 - Week 4 evaluation
-
 - Week 5 trustworthiness analysis
-
 - Week 6 real scan mode
 
 
@@ -1675,7 +1533,6 @@ Command: `python scan.py test_projects\single_file_test\vulnerable_single.py`
 | Accepted vulnerabilities | 9 |
 | Needs human review | 2 |
 | Rejected findings | 1 |
-
 | Evaluation mode | Precision | Recall | F1 Score |
 |---|---:|---:|---:|
 | Strict accepted-only | 100.0% | 75.0% | 85.7% |
@@ -1695,7 +1552,6 @@ Latest scan result:
 | Accepted vulnerabilities | 11 |
 | Needs human review | 0 |
 | Rejected findings | 0 |
-
 | Evaluation mode | Precision | Recall | F1 Score |
 |---|---:|---:|---:|
 | Strict accepted-only | 100.0% | 100.0% | 100.0% |
@@ -1715,7 +1571,6 @@ Latest scan result:
 | Accepted vulnerabilities | 6 |
 | Needs human review | 5 |
 | Rejected findings | 1 |
-
 | Evaluation mode | Precision | Recall | F1 Score |
 |---|---:|---:|---:|
 | Strict accepted-only | 100.0% | 50.0% | 66.7% |
