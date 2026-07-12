@@ -1,4 +1,4 @@
-# Agentic Workflow for Source Code Vulnerability Discovery and Analysis
+﻿# Agentic Workflow for Source Code Vulnerability Discovery and Analysis
 
 
 
@@ -1533,6 +1533,9 @@ Command: `python scan.py test_projects\single_file_test\vulnerable_single.py`
 | Accepted vulnerabilities | 9 |
 | Needs human review | 2 |
 | Rejected findings | 1 |
+
+Demo-level metrics:
+
 | Evaluation mode | Precision | Recall | F1 Score |
 |---|---:|---:|---:|
 | Strict accepted-only | 100.0% | 75.0% | 85.7% |
@@ -1552,6 +1555,9 @@ Latest scan result:
 | Accepted vulnerabilities | 11 |
 | Needs human review | 0 |
 | Rejected findings | 0 |
+
+Demo-level metrics:
+
 | Evaluation mode | Precision | Recall | F1 Score |
 |---|---:|---:|---:|
 | Strict accepted-only | 100.0% | 100.0% | 100.0% |
@@ -1571,6 +1577,9 @@ Latest scan result:
 | Accepted vulnerabilities | 6 |
 | Needs human review | 5 |
 | Rejected findings | 1 |
+
+Demo-level metrics:
+
 | Evaluation mode | Precision | Recall | F1 Score |
 |---|---:|---:|---:|
 | Strict accepted-only | 100.0% | 50.0% | 66.7% |
@@ -1585,3 +1594,4 @@ These demo results show that real scan mode works across single-file, multi-file
 The demo-level F1 scores are useful for validating the real scan workflow, but they should not be compared directly with the Week 4 benchmark metrics. These demo files are intentionally vulnerable and do not contain a balanced set of safe and vulnerable examples. Therefore, false positive rate is not meaningful for these demo scans.
 
 The main value of these tests is to demonstrate that the project has moved from benchmark evaluation to practical source-code scanning with structured reports and human review support.
+
