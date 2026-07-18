@@ -1,0 +1,13 @@
+app_env: local
+artifact_root: artifacts
+evaluation_dir: artifacts/evaluation
+report_dir: artifacts/reports
+ollama_base_url: http://localhost:11434
+ollama_model: qwen2.5-coder:7b
+ollama_temperature: 0
+ollama_seed: 42
+semgrep_config: p/python
+evaluation_seed: 42
+llm_baseline_sample_size: 100
+consistency_sample_size: 30
+prompt_sensitivity_sample_size: 30

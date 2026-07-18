@@ -1,0 +1,7 @@
+from llm.ollama_client import call_qwen
+
+response = call_qwen(
+    "What is SQL Injection?"
+)
+
+print(response)

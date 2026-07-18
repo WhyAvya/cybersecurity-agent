@@ -1,0 +1,19 @@
+from llm.ollama_client import call_qwen
+
+prompt = """
+You are a security analyst.
+
+Respond ONLY with valid JSON.
+
+{
+  "verdict": "TP",
+  "confidence": 0.90,
+  "reasoning": "example",
+  "iterations": 1,
+  "tool_call_evaded": false
+}
+"""
+
+response = call_qwen(prompt)
+
+print(response)

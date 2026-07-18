@@ -1,0 +1,16 @@
+import json
+
+response = """
+{
+  "verdict": "TP",
+  "confidence": 0.90,
+  "reasoning": "Example",
+  "iterations": 1,
+  "tool_call_evaded": false
+}
+"""
+
+data = json.loads(response)
+
+print(data)
+print(type(data))
