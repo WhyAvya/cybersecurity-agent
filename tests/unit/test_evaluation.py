@@ -131,6 +131,14 @@ def test_run_evaluation_writes_artifacts_without_placeholders(tmp_path: Path):
     assert (output_dir / "metrics" / "failures.csv").exists()
     manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["fair_comparison"] is True
+    assert manifest["sampling_method"] == "balanced_stratified_by_label_and_cwe"
+    selected = manifest["selected_ids"]
+    assert [selected_id for selected_id in selected if json.loads(truth_path.read_text(encoding="utf-8"))[selected_id]["vulnerable"]]
+    assert [
+        selected_id
+        for selected_id in selected
+        if not json.loads(truth_path.read_text(encoding="utf-8"))[selected_id]["vulnerable"]
+    ]
     week5 = (output_dir / "week5_report.md").read_text(encoding="utf-8")
     assert "{" not in week5
     assert "}" not in week5

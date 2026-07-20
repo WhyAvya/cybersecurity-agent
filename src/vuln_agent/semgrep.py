@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -61,6 +62,9 @@ class SemgrepAdapter:
         command = [
             executable,
             "--json",
+            "--metrics",
+            "off",
+            "--disable-version-check",
             "--config",
             config or self.settings.semgrep_config,
             str(target_path),
@@ -77,6 +81,7 @@ class SemgrepAdapter:
                 encoding="utf-8",
                 errors="ignore",
                 timeout=self.settings.semgrep_timeout_seconds,
+                env={**os.environ, "SEMGREP_SEND_METRICS": "off"},
             )
         except subprocess.TimeoutExpired as exc:
             raise ToolError(f"Semgrep timed out after {self.settings.semgrep_timeout_seconds}s") from exc
@@ -85,18 +90,22 @@ class SemgrepAdapter:
 
         duration_ms = int((time.perf_counter() - started) * 1000)
         stderr = (result.stderr or "").strip()[:2000]
-        if result.returncode not in (0, 1):
-            raise ToolError(f"Semgrep exited with {result.returncode}: {stderr}")
+        stdout = result.stdout or ""
+        if not stdout.strip():
+            raise ToolError(f"Semgrep exited with {result.returncode} and no JSON output: {stderr}")
 
         try:
-            raw = json.loads(result.stdout or "{}")
+            raw = json.loads(stdout)
         except json.JSONDecodeError as exc:
-            raise ToolError(f"Semgrep returned malformed JSON: {exc}") from exc
+            raise ToolError(f"Semgrep exited with {result.returncode} and returned malformed JSON: {exc}: {stderr}") from exc
+
+        if result.returncode not in (0, 1):
+            raise ToolError(f"Semgrep exited with {result.returncode}: {stderr}")
 
         findings = self._parse_results(raw.get("results", []))
         metadata = ToolMetadata(
             name="semgrep",
-            version=self.version(),
+            version=None,
             config=config or self.settings.semgrep_config,
             duration_ms=duration_ms,
             error=stderr or None,

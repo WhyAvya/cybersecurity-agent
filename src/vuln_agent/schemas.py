@@ -192,6 +192,7 @@ class EvaluationPrediction(BaseModel):
     source_code_supplied: bool = False
     semgrep_gate_triggered: bool = False
     raw_response_path: str | None = None
+    semgrep_raw_path: str | None = None
     error: str | None = None
 
 

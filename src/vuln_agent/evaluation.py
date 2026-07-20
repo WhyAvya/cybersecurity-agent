@@ -6,6 +6,7 @@ import csv
 import json
 import math
 import random
+import subprocess
 import time
 import uuid
 from collections import defaultdict
@@ -229,6 +230,32 @@ def write_text_artifact(path: Path, text: str | None) -> str | None:
     return str(path)
 
 
+def scan_semgrep_capture(
+    settings: Settings,
+    file_path: Path,
+    raw_dir: Path | None,
+    test_id: str,
+) -> tuple[list[Any], Any, str | None]:
+    captured: dict[str, str | int | None] = {"stdout": None, "stderr": None, "returncode": None}
+
+    def runner(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        result = subprocess.run(command, **kwargs)
+        captured["stdout"] = result.stdout or ""
+        captured["stderr"] = result.stderr or ""
+        captured["returncode"] = result.returncode
+        return result
+
+    findings, metadata = SemgrepAdapter(settings, runner=runner).scan(file_path)
+    raw_path = None
+    if raw_dir is not None:
+        raw_path = write_text_artifact(raw_dir / f"{test_id}.semgrep.json", str(captured["stdout"] or ""))
+        write_text_artifact(
+            raw_dir / f"{test_id}.semgrep.stderr.txt",
+            str(captured["stderr"] or ""),
+        )
+    return findings, metadata, raw_path
+
+
 def offline_predictions(
     ground_truth: dict[str, dict[str, Any]],
     selected_ids: list[str],
@@ -384,7 +411,7 @@ def live_prediction(
     try:
         file_path = benchmark_file_for_id(root, test_id)
         if mode == "semgrep":
-            findings, _ = SemgrepAdapter(settings).scan(file_path)
+            findings, _, semgrep_raw_path = scan_semgrep_capture(settings, file_path, raw_dir, test_id)
             predicted = bool(findings)
             predicted_cwe = normalize_cwe([finding.normalized_cwe for finding in findings])
             confidence = 1.0 if predicted else 0.0
@@ -409,12 +436,13 @@ def live_prediction(
             schema_valid = True
             semgrep_finding_count = None
             semgrep_rule_ids = []
+            semgrep_raw_path = None
             llm_called = True
             decision_source = "llm_full_file"
             source_code_supplied = True
             semgrep_gate_triggered = False
         elif mode == "semgrep_gated":
-            findings, _tool_metadata = SemgrepAdapter(settings).scan(file_path)
+            findings, _tool_metadata, semgrep_raw_path = scan_semgrep_capture(settings, file_path, raw_dir, test_id)
             if not findings:
                 predicted = False
                 predicted_cwe = "NONE"
@@ -457,7 +485,7 @@ def live_prediction(
                 source_code_supplied = False
                 semgrep_gate_triggered = False
         elif mode == "hybrid":
-            findings, _tool_metadata = SemgrepAdapter(settings).scan(file_path)
+            findings, _tool_metadata, semgrep_raw_path = scan_semgrep_capture(settings, file_path, raw_dir, test_id)
             code = file_path.read_text(encoding="utf-8", errors="replace")
             semgrep_summary = json.dumps(
                 [
@@ -511,6 +539,7 @@ def live_prediction(
             source_code_supplied=source_code_supplied,
             semgrep_gate_triggered=semgrep_gate_triggered,
             raw_response_path=raw_response_path,
+            semgrep_raw_path=semgrep_raw_path,
         )
     except (FileNotFoundError, SecurityPolicyError, ToolError, LLMError, SchemaParseError, ValueError) as exc:
         return EvaluationPrediction(
@@ -573,9 +602,10 @@ def run_evaluation(
         ground_truth_path = root / settings.ground_truth_path
     ground_truth = load_ground_truth(ground_truth_path)
     size = sample_size or settings.llm_baseline_sample_size
-    selected_ids = selected_ids or stratified_sample_ids(
-        ground_truth, min(size, len(ground_truth)), seed or settings.evaluation_seed
-    )
+    sampling_method = "provided"
+    if selected_ids is None:
+        selected_ids = pilot_sample_ids(ground_truth, min(size, len(ground_truth)), seed or settings.evaluation_seed)
+        sampling_method = "balanced_stratified_by_label_and_cwe"
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     output_dir = settings.evaluation_dir / run_id
 
@@ -617,6 +647,7 @@ def run_evaluation(
             "seed": seed or settings.evaluation_seed,
             "ground_truth_path": str(ground_truth_path),
             "selected_ids": selected_ids,
+            "sampling_method": sampling_method,
             "fair_comparison": len(set(tuple(item.test_id for item in rows) for rows in predictions_by_mode.values())) == 1,
             "start_time": datetime.now(timezone.utc).isoformat(),
             "status": "complete",
