@@ -20,14 +20,14 @@ class Settings(BaseModel):
     report_dir: Path = Path("artifacts/reports")
     evaluation_dir: Path = Path("artifacts/evaluation")
     ground_truth_path: Path = Path("evaluation/ground_truth.json")
-    ollama_base_url: str = "http://localhost:11434"
+    ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5-coder:7b"
     ollama_timeout_seconds: float = Field(default=120, gt=0)
     ollama_connect_timeout_seconds: float = Field(default=10, gt=0)
     ollama_max_retries: int = Field(default=2, ge=0, le=10)
     ollama_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     ollama_seed: int | None = 42
-    ollama_num_ctx: int | None = Field(default=8192, ge=512)
+    ollama_num_ctx: int | None = Field(default=2048, ge=512)
     semgrep_binary: str = "semgrep"
     semgrep_config: str = "p/python"
     semgrep_timeout_seconds: float = Field(default=120, gt=0)

@@ -3,10 +3,12 @@ from pathlib import Path
 
 from vuln_agent.config import Settings
 from vuln_agent.evaluation import (
+    benchmark_file_for_id,
     bootstrap_confidence_intervals,
     calculate_metrics,
     failure_records,
     per_cwe_metrics,
+    pilot_sample_ids,
     run_evaluation,
     stratified_sample_ids,
 )
@@ -21,6 +23,31 @@ def test_stratified_sample_is_deterministic():
         "d": {"vulnerable": False, "cwe": "NONE"},
     }
     assert stratified_sample_ids(ground_truth, 3, 7) == stratified_sample_ids(ground_truth, 3, 7)
+
+
+def test_benchmark_file_lookup_uses_current_working_directory(tmp_path: Path, monkeypatch):
+    benchmark_file = tmp_path / "data" / "BenchmarkPython" / "testcode" / "BenchmarkTest00001.py"
+    benchmark_file.parent.mkdir(parents=True)
+    benchmark_file.write_text("print('ok')", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert benchmark_file_for_id(Path("/missing/project/root"), "BenchmarkTest00001") == benchmark_file
+
+
+def test_pilot_sample_ids_balances_vulnerable_and_safe_cases():
+    ground_truth = {
+        "v1": {"vulnerable": True, "cwe": "CWE-022"},
+        "v2": {"vulnerable": True, "cwe": "CWE-079"},
+        "v3": {"vulnerable": True, "cwe": "CWE-089"},
+        "s1": {"vulnerable": False, "cwe": "CWE-022"},
+        "s2": {"vulnerable": False, "cwe": "CWE-079"},
+        "s3": {"vulnerable": False, "cwe": "CWE-330"},
+    }
+    selected = pilot_sample_ids(ground_truth, 4, seed=42)
+    assert len(selected) == 4
+    assert any(ground_truth[test_id]["vulnerable"] for test_id in selected)
+    assert any(not ground_truth[test_id]["vulnerable"] for test_id in selected)
+    assert len({ground_truth[test_id]["cwe"] for test_id in selected}) > 1
 
 
 def test_metrics_handle_binary_counts():
@@ -96,6 +123,7 @@ def test_run_evaluation_writes_artifacts_without_placeholders(tmp_path: Path):
     assert (output_dir / "predictions" / "all.jsonl").exists()
     assert (output_dir / "predictions" / "semgrep.jsonl").exists()
     assert (output_dir / "predictions" / "llm.jsonl").exists()
+    assert (output_dir / "predictions" / "semgrep_gated.jsonl").exists()
     assert (output_dir / "predictions" / "hybrid.jsonl").exists()
     assert (output_dir / "metrics" / "summary.csv").exists()
     assert (output_dir / "metrics" / "confidence_intervals.csv").exists()

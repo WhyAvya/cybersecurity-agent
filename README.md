@@ -32,7 +32,15 @@ The demo uses `--offline` behavior internally, so it does not require Semgrep or
 
 ## Real Scan
 
-Start Ollama and pull the configured model first:
+Start the local Windows Ollama app first. Current development and evaluation use:
+
+```text
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen2.5-coder:7b
+OLLAMA_NUM_CTX=2048
+```
+
+Install the configured model in Windows Ollama before running live LLM checks:
 
 ```bash
 ollama pull qwen2.5-coder:7b
@@ -65,21 +73,34 @@ See `.env.example` and `configs/evaluation.yaml`.
 
 ## Docker
 
+Docker support is preserved for later reproducibility testing. The normal local
+development workflow currently uses the Windows Ollama service, not the Docker
+Ollama service.
+
 ```bash
 docker compose build
-docker compose up -d ollama
-docker compose run --rm ollama ollama pull qwen2.5-coder:7b
 docker compose run --rm app doctor
 ```
 
-Docker config uses `OLLAMA_BASE_URL=http://ollama:11434`, not `localhost`.
+To test the Docker Ollama service explicitly, enable the optional profile:
+
+```bash
+docker compose --profile docker-ollama up -d ollama
+docker compose --profile docker-ollama run --rm ollama ollama pull qwen2.5-coder:7b
+```
+
+Use only one Ollama mode at a time:
+
+- Windows Ollama: `OLLAMA_BASE_URL=http://127.0.0.1:11434`
+- Docker Compose Ollama: `OLLAMA_BASE_URL=http://ollama:11434`
 
 ## Evaluation Status
 
-The legacy `evaluation/` scripts contain useful Week 4/Week 5 work, but full benchmark execution migration is not complete. The new CLI writes reproducible evaluation artifacts for offline harness checks:
+The legacy `evaluation/` scripts contain useful Week 4/Week 5 work. The supported CLI writes reproducible evaluation artifacts and can run offline harness checks or live Semgrep/LLM/hybrid benchmark checks against the configured local benchmark dataset:
 
 ```bash
 vuln-agent evaluate all --config configs/evaluation.yaml --sample-size 30 --offline
+vuln-agent evaluate all --config configs/evaluation.yaml --sample-size 30
 vuln-agent trustworthiness --latest-run
 vuln-agent report week4 --latest-run
 vuln-agent report week5 --latest-run
@@ -98,7 +119,7 @@ Get-Content (Join-Path $latestEval.FullName "week4_report.md")
 Get-Content (Join-Path $latestEval.FullName "week5_report.md")
 ```
 
-Scientific Semgrep-only, LLM-only, and hybrid comparisons still need live benchmark migration. Those final comparisons must use the same immutable evaluation IDs for all modes.
+Scientific Semgrep-only, LLM-only, and hybrid comparisons must use the same immutable evaluation IDs for all modes.
 
 ## Testing
 
@@ -127,7 +148,7 @@ Scanned files are read as untrusted input and never executed. Source context is 
 
 ## Known Limitations
 
-- Full benchmark bootstrap and fair evaluation migration are not complete.
-- Week 4/Week 5 reports still need complete generation from canonical artifacts.
+- Full benchmark bootstrap from a remote source still needs checksum-pinned dataset release metadata.
+- Final Week 4/Week 5 reports should be regenerated after the full live benchmark run.
 - Docker build was added but may require internet access to install Semgrep during image build.
 - Legacy scripts remain for historical continuity and should be migrated or archived incrementally.

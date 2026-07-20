@@ -182,6 +182,16 @@ class EvaluationPrediction(BaseModel):
     predicted_cwe: str = "NONE"
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     latency_ms: int | None = Field(default=None, ge=0)
+    schema_valid: bool = True
+    raw_response: str | None = None
+    source_file: str | None = None
+    semgrep_finding_count: int | None = None
+    semgrep_rule_ids: list[str] = Field(default_factory=list)
+    llm_called: bool = False
+    decision_source: str = ""
+    source_code_supplied: bool = False
+    semgrep_gate_triggered: bool = False
+    raw_response_path: str | None = None
     error: str | None = None
 
 

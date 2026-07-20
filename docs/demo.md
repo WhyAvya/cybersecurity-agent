@@ -9,6 +9,9 @@ vuln-agent demo
 Run a real scan after installing Semgrep and starting Ollama:
 
 ```bash
+set OLLAMA_BASE_URL=http://127.0.0.1:11434
+set OLLAMA_MODEL=qwen2.5-coder:7b
+set OLLAMA_NUM_CTX=2048
 vuln-agent scan examples/vulnerable_app
 ```
 

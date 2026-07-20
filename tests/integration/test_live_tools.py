@@ -1,4 +1,5 @@
 import shutil
+import sys
 
 import pytest
 
@@ -15,6 +16,8 @@ def test_semgrep_binary_reports_version():
     adapter = SemgrepAdapter(settings)
     if adapter.executable_path() is None:
         pytest.skip("Semgrep binary is not installed")
+    if sys.platform == "win32" and shutil.which(settings.semgrep_binary) is None:
+        pytest.skip("Semgrep is only available through a Windows venv shim; Docker covers live Semgrep verification")
     assert adapter.version()
 
 

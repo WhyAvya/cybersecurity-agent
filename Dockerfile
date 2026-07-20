@@ -26,7 +26,7 @@ USER appuser
 ENV ARTIFACT_ROOT=/artifacts \
     REPORT_DIR=/artifacts/reports \
     EVALUATION_DIR=/artifacts/evaluation \
-    OLLAMA_BASE_URL=http://ollama:11434
+    OLLAMA_BASE_URL=http://host.docker.internal:11434
 
 ENTRYPOINT ["vuln-agent"]
 CMD ["doctor"]

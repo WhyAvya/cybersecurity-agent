@@ -1,6 +1,8 @@
 services:
   ollama:
     image: ollama/ollama:latest
+    profiles: ["docker-ollama"]
+    gpus: all
     ports:
       - "11434:11434"
     volumes:
@@ -9,16 +11,17 @@ services:
   app:
     build: .
     environment:
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: qwen2.5-coder:7b
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5-coder:7b}
+      OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-2048}
       ARTIFACT_ROOT: /artifacts
       REPORT_DIR: /artifacts/reports
       EVALUATION_DIR: /artifacts/evaluation
     volumes:
       - ./artifacts:/artifacts
+      - ./data:/app/data:ro
+      - ./evaluation:/app/evaluation:ro
       - ./examples:/targets:ro
-    depends_on:
-      - ollama
     command: ["doctor"]
 
 volumes:

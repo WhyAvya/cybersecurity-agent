@@ -42,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     evaluate = subparsers.add_parser("evaluate", help="Create an evaluation run scaffold.")
     evaluate.add_argument("--config", help=argparse.SUPPRESS)
-    evaluate.add_argument("mode", choices=["semgrep", "llm", "hybrid", "all"])
+    evaluate.add_argument("mode", choices=["semgrep", "llm", "semgrep_gated", "hybrid", "all"])
     evaluate.add_argument("--sample-size", type=int)
     evaluate.add_argument("--seed", type=int)
     evaluate.add_argument("--offline", action="store_true")
