@@ -1,38 +1,52 @@
-# Demo
+# Week 6 Demo
 
-Run an offline demo without Semgrep or Ollama:
+## Preparation
 
-```bash
-vuln-agent demo
-```
-
-Run a real scan after installing Semgrep and starting Ollama:
-
-```bash
-set OLLAMA_BASE_URL=http://127.0.0.1:11434
-set OLLAMA_MODEL=qwen2.5-coder:7b
-set OLLAMA_NUM_CTX=2048
-vuln-agent scan examples/vulnerable_app
-```
-
-PowerShell helper to inspect the latest scan report without manually replacing
-`<run_id>`:
+Start Windows Ollama and install the required model:
 
 ```powershell
-$latestScan = Get-ChildItem artifacts\reports -Directory |
-  Sort-Object LastWriteTime -Descending |
-  Select-Object -First 1
-Get-ChildItem $latestScan.FullName
-Get-Content (Join-Path $latestScan.FullName "scan_report.md")
+ollama pull qwen2.5-coder:7b
 ```
 
-PowerShell helper to inspect the latest evaluation report:
+Build the Docker app image:
 
 ```powershell
-$latestEval = Get-ChildItem artifacts\evaluation -Directory |
-  Sort-Object LastWriteTime -Descending |
-  Select-Object -First 1
-Get-ChildItem $latestEval.FullName -Recurse
-Get-Content (Join-Path $latestEval.FullName "week4_report.md")
-Get-Content (Join-Path $latestEval.FullName "week5_report.md")
+docker compose build app
 ```
+
+## Command
+
+```powershell
+.\scripts\week6_demo.ps1 -ArtifactRoot artifacts\final\week6-demo-local
+```
+
+Shell equivalent:
+
+```sh
+sh scripts/week6_demo.sh artifacts/final/week6-demo-local
+```
+
+## Expected Stages
+
+1. Docker availability check.
+2. Ollama reachability check.
+3. Model availability check.
+4. Application image build.
+5. Original hybrid scan of `examples/vulnerable_app`.
+6. Original hybrid scan of `examples/safe_app`.
+7. Output manifest written under the artifact root.
+
+## Output Fields
+
+The scan report includes status, analyzer verdict, confidence, CWE, concise evidence, remediation, and metadata. Raw and structured outputs are stored in the selected artifact directory.
+
+## Common Failures
+
+- Docker is not running.
+- Windows Ollama is not running.
+- `qwen2.5-coder:7b` has not been pulled.
+- Local hardware makes LLM inference slow.
+
+## Cleanup
+
+Demo artifacts can be removed from `artifacts/final/week6-demo-local` after inspection. Frozen Week 4, Week 5, and post-Week-5 artifacts should not be modified.

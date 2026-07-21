@@ -1,16 +1,64 @@
 # Architecture
 
+## Runtime Overview
+
+The implemented system is a Python package running in a Docker application container. Semgrep is installed inside that container. LLM calls go to a Windows-host Ollama service at `http://host.docker.internal:11434` using `qwen2.5-coder:7b`.
+
 ```mermaid
 flowchart TD
-    A[CLI] --> B[Settings]
-    A --> C[Semgrep Adapter]
-    C --> D[Canonical SemgrepFinding]
-    D --> E[Safe Context Fetcher]
-    E --> F[Analyzer Prompt]
-    F --> G[LLM Client]
-    G --> H[AgentAnalysis]
-    H --> I[Reporter Policy]
-    I --> J[FinalFinding JSONL and Markdown]
+    A[Target source] --> B[CLI or evaluation harness]
+    B --> C[Semgrep adapter]
+    B --> D[LLM prompt builder]
+    C --> E[Canonical Semgrep findings]
+    D --> F[Ollama HTTP API]
+    E --> G[Orchestrator]
+    F --> G
+    G --> H[Pydantic schema validation]
+    H --> I[JSONL, Markdown, manifest artifacts]
 ```
 
-The current implementation is a bounded Semgrep -> context -> analyzer -> reporter workflow. It is intentionally conservative and records failures as errors or review items rather than silently treating them as safe code.
+## Mode Comparison
+
+```mermaid
+flowchart LR
+    S[Source] --> M1[semgrep: tool-only]
+    S --> M2[llm: source to LLM]
+    S --> G1[semgrep_gated: Semgrep first]
+    G1 -->|findings only| G2[LLM triage]
+    S --> H1[hybrid: source plus Semgrep evidence]
+    H1 --> H2[LLM decision]
+```
+
+- `semgrep`: decides vulnerable when Semgrep reports findings.
+- `llm`: sends source code to Ollama and validates structured JSON.
+- `semgrep_gated`: only calls the LLM after Semgrep reports a finding.
+- `hybrid`: supplies source plus Semgrep evidence to the benchmark reasoning workflow; Semgrep findings are evidence, not final proof.
+
+## Evaluation Flow
+
+```mermaid
+flowchart TD
+    GT[Ground truth JSON] --> S[Deterministic sample]
+    S --> R[Run same case IDs per mode]
+    R --> P[Prediction JSONL]
+    P --> M[Metrics CSV]
+    P --> F[Failure taxonomy and reports]
+```
+
+## Artifact Flow
+
+```mermaid
+flowchart TD
+    Raw[Raw tool/model output] --> Jsonl[Predictions JSONL]
+    Jsonl --> Csv[Metrics CSV]
+    Csv --> Md[Reports]
+    Raw --> Manifest[Manifest and hashes]
+```
+
+## Error Handling And Checkpoints
+
+Tool errors, schema errors, and timeouts are recorded as explicit rows rather than converted into safe predictions. Long-running experiments use checkpoint JSON files and unique `(configuration, case_id)` or `(mode, case_id)` keys to avoid rerunning completed work.
+
+## Human Review
+
+The project produces automatic classifications and review queues. It does not claim human review unless a human has actually reviewed the case.
