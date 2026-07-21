@@ -9,10 +9,17 @@ from vuln_agent.week5 import (
     build_failure_rows,
     build_hallucination_rows,
     calibration_rows,
+    completed_keys,
+    finalize_week5,
+    label_agreement,
     load_week4_artifact,
+    prompt_hash,
     run_derivation,
+    select_balanced_subset,
     sha256_file,
     validate_frozen_predictions,
+    write_consistency_summaries,
+    write_prompt_sensitivity_summaries,
 )
 
 
@@ -164,3 +171,111 @@ def test_run_derivation_writes_expected_outputs(tmp_path: Path):
     assert (output / "failure_taxonomy.csv").exists()
     assert (output / "hallucination_cases.csv").exists()
     assert (output / "human_review_queue.csv").exists()
+
+
+def test_deterministic_subset_selection(tmp_path: Path):
+    artifact = load_week4_artifact(_make_artifact(tmp_path), tmp_path)
+    rows = build_case_rows(artifact, tmp_path)
+    first = select_balanced_subset(rows, seed=42, sample_size=20)
+    second = select_balanced_subset(rows, seed=42, sample_size=20)
+    assert [row["case_id"] for row in first] == [row["case_id"] for row in second]
+    assert sum(1 for row in first if row["ground_truth"] == "vulnerable") == 10
+    assert sum(1 for row in first if row["ground_truth"] == "safe") == 10
+
+
+def test_consistency_metric_computation():
+    assert label_agreement(["vulnerable", "vulnerable", "safe"]) == pytest.approx(1 / 3)
+    assert label_agreement(["safe", "safe", "safe"]) == 1.0
+
+
+def test_completed_keys_for_checkpoint_resume(tmp_path: Path):
+    path = tmp_path / "runs.jsonl"
+    _write_jsonl(
+        path,
+        [
+            {"case_id": "a", "mode": "llm", "repetition": 1, "completed": True},
+            {"case_id": "b", "mode": "llm", "repetition": 1, "raw_response_path": "raw/b.txt"},
+            {"case_id": "c", "mode": "llm", "repetition": 1, "error": "timeout"},
+        ],
+    )
+    assert completed_keys(path, ("case_id", "mode", "repetition")) == {
+        ("a", "llm", "1"),
+        ("b", "llm", "1"),
+        ("c", "llm", "1"),
+    }
+
+
+def test_prompt_hash_generation_is_stable():
+    assert prompt_hash("abc") == prompt_hash("abc")
+    assert prompt_hash("abc") != prompt_hash("abcd")
+
+
+def test_prompt_comparison_summary(tmp_path: Path):
+    output = tmp_path
+    _write_jsonl(
+        output / "prompt_sensitivity_runs.jsonl",
+        [
+            {
+                "case_id": "Case000",
+                "mode": "llm",
+                "prompt_style": "concise",
+                "ground_truth": "vulnerable",
+                "expected_vulnerable": True,
+                "predicted_label": "safe",
+                "predicted_vulnerable": False,
+                "predicted_cwe": "NONE",
+                "confidence": 0.2,
+                "schema_valid": True,
+                "raw_response_path": "raw.txt",
+            },
+            {
+                "case_id": "Case000",
+                "mode": "hybrid",
+                "prompt_style": "concise",
+                "ground_truth": "vulnerable",
+                "expected_vulnerable": True,
+                "predicted_label": "vulnerable",
+                "predicted_vulnerable": True,
+                "predicted_cwe": "CWE-089",
+                "confidence": 0.8,
+                "schema_valid": True,
+                "raw_response_path": "raw.txt",
+            },
+        ],
+    )
+    case_rows = [
+        {
+            "case_id": "Case000",
+            "mode": "llm",
+            "ground_truth": "vulnerable",
+            "predicted_label": "vulnerable",
+            "cwe_predicted": "CWE-089",
+            "confidence": "0.9",
+        },
+        {
+            "case_id": "Case000",
+            "mode": "hybrid",
+            "ground_truth": "vulnerable",
+            "predicted_label": "vulnerable",
+            "cwe_predicted": "CWE-089",
+            "confidence": "0.9",
+        },
+    ]
+    write_prompt_sensitivity_summaries(output, case_rows)
+    assert (output / "prompt_sensitivity_case_summary.csv").exists()
+    assert (output / "prompt_sensitivity_metrics.csv").exists()
+
+
+def test_consistency_summary_writer(tmp_path: Path):
+    _write_jsonl(
+        tmp_path / "consistency_runs.jsonl",
+        [
+            {"case_id": "a", "mode": "llm", "completed": True, "predicted_label": "safe", "predicted_cwe": "NONE", "confidence": 0.1, "schema_valid": True},
+            {"case_id": "a", "mode": "llm", "completed": True, "predicted_label": "safe", "predicted_cwe": "NONE", "confidence": 0.2, "schema_valid": True},
+            {"case_id": "a", "mode": "hybrid", "completed": True, "predicted_label": "vulnerable", "predicted_cwe": "CWE-089", "confidence": 0.8, "schema_valid": True},
+            {"case_id": "a", "mode": "hybrid", "completed": True, "predicted_label": "safe", "predicted_cwe": "NONE", "confidence": 0.4, "schema_valid": True},
+        ],
+    )
+    write_consistency_summaries(tmp_path)
+    assert (tmp_path / "consistency_case_summary.csv").exists()
+    assert (tmp_path / "consistency_mode_summary.csv").exists()
