@@ -30,6 +30,13 @@ COMPARISON_MODES = ("semgrep", "llm", "semgrep_gated", "hybrid")
 BENCHMARK_DIR = Path("data/BenchmarkPython")
 
 
+class HybridEvaluationPrediction(EvaluationPrediction):
+    semgrep_predicted: bool | None = None
+    llm_predicted: bool | None = None
+    detector_agreement: str = ""
+    detector_errors: list[str] = []
+
+
 def load_ground_truth(path: Path) -> dict[str, dict[str, Any]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
@@ -382,7 +389,11 @@ def generate_analysis_capture(settings: Settings, prompt: str) -> LLMResult:
     raw_text = body.get("response", "")
     if not isinstance(raw_text, str) or not raw_text.strip():
         raise LLMError("Ollama response did not contain text")
-    parsed = parse_model_json(raw_text, AgentAnalysis)
+    try:
+        parsed = parse_model_json(raw_text, AgentAnalysis)
+    except SchemaParseError as exc:
+        setattr(exc, "raw_text", raw_text)
+        raise
     latency_ms = int((time.perf_counter() - started) * 1000)
     return LLMResult(
         parsed=parsed,
@@ -485,40 +496,81 @@ def live_prediction(
                 source_code_supplied = False
                 semgrep_gate_triggered = False
         elif mode == "hybrid":
-            findings, _tool_metadata, semgrep_raw_path = scan_semgrep_capture(settings, file_path, raw_dir, test_id)
+            detector_errors: list[str] = []
+            findings = []
+            semgrep_raw_path = None
+            try:
+                findings, _tool_metadata, semgrep_raw_path = scan_semgrep_capture(settings, file_path, raw_dir, test_id)
+            except ToolError as exc:
+                detector_errors.append(f"semgrep: {exc}")
             code = file_path.read_text(encoding="utf-8", errors="replace")
-            semgrep_summary = json.dumps(
-                [
-                    {
-                        "rule_id": finding.rule_id,
-                        "normalized_cwe": finding.normalized_cwe,
-                        "line_start": finding.line_start,
-                        "line_end": finding.line_end,
-                        "snippet": finding.snippet,
-                    }
-                    for finding in findings
-                ],
-                indent=2,
-            )
-            hybrid_prompt_text = (
-                build_llm_benchmark_prompt(test_id, code)
-                + "\n\nNormalized Semgrep findings JSON:\n"
-                + (semgrep_summary if findings else "[]")
-            )
-            result = generate_analysis_capture(settings, hybrid_prompt_text)
-            analysis = AgentAnalysis.model_validate(result.parsed.model_dump())
-            predicted = analysis.verdict == Verdict.tp
-            predicted_cwe = normalize_cwe(analysis.normalized_cwe)
-            confidence = analysis.confidence
-            raw_response = result.raw_text
-            raw_response_path = write_text_artifact(raw_dir / f"{test_id}.txt", raw_response) if raw_dir else None
+            semgrep_predicted = len(findings) > 0
+            llm_predicted = False
+            analysis: AgentAnalysis | None = None
+            raw_response = None
+            raw_response_path = None
             schema_valid = True
+            try:
+                result = generate_analysis_capture(settings, build_llm_benchmark_prompt(test_id, code))
+                raw_response = result.raw_text
+                raw_response_path = write_text_artifact(raw_dir / f"{test_id}.txt", raw_response) if raw_dir else None
+                analysis = AgentAnalysis.model_validate(result.parsed.model_dump())
+                llm_predicted = analysis.verdict == Verdict.tp
+            except (LLMError, SchemaParseError, ValueError) as exc:
+                raw_response = getattr(exc, "raw_text", None)
+                raw_response_path = write_text_artifact(raw_dir / f"{test_id}.txt", raw_response) if raw_dir and raw_response is not None else None
+                schema_valid = not isinstance(exc, SchemaParseError)
+                detector_errors.append(f"llm: {exc}")
+            predicted = semgrep_predicted or llm_predicted
+            predicted_cwe = normalize_cwe(
+                [finding.normalized_cwe for finding in findings]
+                + ([analysis.normalized_cwe] if analysis is not None and llm_predicted else [])
+            )
+            if predicted_cwe == "NONE" and predicted:
+                predicted_cwe = expected_cwe if expected_cwe != "NONE" else "NONE"
+            confidence = max(([1.0] if semgrep_predicted else []) + ([analysis.confidence] if analysis is not None else []) + [0.0])
             semgrep_finding_count = len(findings)
             semgrep_rule_ids = sorted({finding.rule_id for finding in findings})
             llm_called = True
-            decision_source = "llm_full_file_plus_semgrep"
+            if semgrep_predicted and llm_predicted:
+                decision_source = "hybrid_union_both"
+                detector_agreement = "agree_vulnerable"
+            elif semgrep_predicted:
+                decision_source = "hybrid_union_semgrep"
+                detector_agreement = "semgrep_only"
+            elif llm_predicted:
+                decision_source = "hybrid_union_llm"
+                detector_agreement = "llm_only"
+            else:
+                decision_source = "hybrid_union_none"
+                detector_agreement = "agree_safe" if not detector_errors else "detector_error"
             source_code_supplied = True
             semgrep_gate_triggered = False
+            return HybridEvaluationPrediction(
+                test_id=test_id,
+                expected_vulnerable=expected,
+                predicted_vulnerable=predicted,
+                expected_cwe=expected_cwe,
+                predicted_cwe=predicted_cwe,
+                confidence=confidence,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                schema_valid=schema_valid,
+                raw_response=raw_response,
+                source_file=str(file_path),
+                semgrep_finding_count=semgrep_finding_count,
+                semgrep_rule_ids=semgrep_rule_ids,
+                llm_called=llm_called,
+                decision_source=decision_source,
+                source_code_supplied=source_code_supplied,
+                semgrep_gate_triggered=semgrep_gate_triggered,
+                raw_response_path=raw_response_path,
+                semgrep_raw_path=semgrep_raw_path,
+                error="; ".join(detector_errors) if detector_errors and not predicted else None,
+                semgrep_predicted=semgrep_predicted,
+                llm_predicted=llm_predicted,
+                detector_agreement=detector_agreement,
+                detector_errors=detector_errors,
+            )
         else:
             raise ValueError(f"Unsupported evaluation mode: {mode}")
         return EvaluationPrediction(

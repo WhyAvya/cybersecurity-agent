@@ -7,12 +7,15 @@ from vuln_agent.evaluation import (
     bootstrap_confidence_intervals,
     calculate_metrics,
     failure_records,
+    live_prediction,
     per_cwe_metrics,
     pilot_sample_ids,
     run_evaluation,
     stratified_sample_ids,
 )
-from vuln_agent.schemas import EvaluationPrediction
+from vuln_agent.exceptions import SchemaParseError, ToolError
+from vuln_agent.llm import LLMResult
+from vuln_agent.schemas import AgentAnalysis, EvaluationPrediction, ModelMetadata, SemgrepFinding, Severity, Verdict
 
 
 def test_stratified_sample_is_deterministic():
@@ -142,3 +145,114 @@ def test_run_evaluation_writes_artifacts_without_placeholders(tmp_path: Path):
     week5 = (output_dir / "week5_report.md").read_text(encoding="utf-8")
     assert "{" not in week5
     assert "}" not in week5
+
+
+def _write_benchmark_case(root: Path, test_id: str = "BenchmarkTest00001") -> None:
+    path = root / "data" / "BenchmarkPython" / "testcode" / f"{test_id}.py"
+    path.parent.mkdir(parents=True)
+    path.write_text("import os\ncmd = input()\nos.system(cmd)\n", encoding="utf-8")
+
+
+def _semgrep_finding() -> SemgrepFinding:
+    return SemgrepFinding(
+        finding_id="sg-1",
+        relative_file="BenchmarkTest00001.py",
+        line_start=3,
+        line_end=3,
+        rule_id="python.command",
+        raw_semgrep_cwes=["CWE-078"],
+        normalized_cwe="CWE-078",
+        severity=Severity.high,
+        snippet="os.system(cmd)",
+    )
+
+
+def _llm_result(verdict: Verdict) -> LLMResult:
+    analysis = AgentAnalysis(verdict=verdict, confidence=0.9 if verdict == Verdict.tp else 0.2, normalized_cwe="CWE-078" if verdict == Verdict.tp else "NONE", reasoning_summary="analysis")
+    return LLMResult(parsed=analysis, raw_text=analysis.model_dump_json(), metadata=ModelMetadata(model="fake"), latency_ms=1)
+
+
+def _hybrid_prediction(monkeypatch, tmp_path: Path, semgrep_findings, llm_result):
+    _write_benchmark_case(tmp_path)
+    prompts = []
+
+    def fake_semgrep(settings, file_path, raw_dir, test_id):
+        if isinstance(semgrep_findings, Exception):
+            raise semgrep_findings
+        return semgrep_findings, None, str(raw_dir / f"{test_id}.semgrep.json") if raw_dir else None
+
+    def fake_llm(settings, prompt):
+        prompts.append(prompt)
+        if isinstance(llm_result, Exception):
+            raise llm_result
+        return llm_result
+
+    monkeypatch.setattr("vuln_agent.evaluation.scan_semgrep_capture", fake_semgrep)
+    monkeypatch.setattr("vuln_agent.evaluation.generate_analysis_capture", fake_llm)
+    prediction = live_prediction(
+        Settings(evaluation_dir=tmp_path / "eval"),
+        tmp_path,
+        "BenchmarkTest00001",
+        {"vulnerable": True, "cwe": "CWE-078"},
+        "hybrid",
+        tmp_path / "raw",
+    )
+    return prediction, prompts
+
+
+def test_hybrid_semgrep_true_llm_false_predicts_true(monkeypatch, tmp_path: Path):
+    prediction, _ = _hybrid_prediction(monkeypatch, tmp_path, [_semgrep_finding()], _llm_result(Verdict.fp))
+    assert prediction.predicted_vulnerable is True
+    assert prediction.semgrep_predicted is True
+    assert prediction.llm_predicted is False
+    assert prediction.decision_source == "hybrid_union_semgrep"
+
+
+def test_hybrid_semgrep_false_llm_true_predicts_true(monkeypatch, tmp_path: Path):
+    prediction, _ = _hybrid_prediction(monkeypatch, tmp_path, [], _llm_result(Verdict.tp))
+    assert prediction.predicted_vulnerable is True
+    assert prediction.semgrep_predicted is False
+    assert prediction.llm_predicted is True
+    assert prediction.decision_source == "hybrid_union_llm"
+
+
+def test_hybrid_both_true_predicts_true_and_agreement(monkeypatch, tmp_path: Path):
+    prediction, _ = _hybrid_prediction(monkeypatch, tmp_path, [_semgrep_finding()], _llm_result(Verdict.tp))
+    assert prediction.predicted_vulnerable is True
+    assert prediction.detector_agreement == "agree_vulnerable"
+    assert prediction.decision_source == "hybrid_union_both"
+
+
+def test_hybrid_both_false_predicts_false(monkeypatch, tmp_path: Path):
+    prediction, _ = _hybrid_prediction(monkeypatch, tmp_path, [], _llm_result(Verdict.fp))
+    assert prediction.predicted_vulnerable is False
+    assert prediction.detector_agreement == "agree_safe"
+    assert prediction.decision_source == "hybrid_union_none"
+
+
+def test_hybrid_semgrep_true_llm_schema_error_preserves_positive(monkeypatch, tmp_path: Path):
+    error = SchemaParseError("bad schema")
+    setattr(error, "raw_text", "{bad")
+    prediction, _ = _hybrid_prediction(monkeypatch, tmp_path, [_semgrep_finding()], error)
+    assert prediction.predicted_vulnerable is True
+    assert prediction.semgrep_predicted is True
+    assert prediction.llm_predicted is False
+    assert prediction.error is None
+    assert prediction.detector_errors == ["llm: bad schema"]
+    assert prediction.raw_response == "{bad"
+
+
+def test_hybrid_semgrep_error_llm_true_preserves_positive(monkeypatch, tmp_path: Path):
+    prediction, _ = _hybrid_prediction(monkeypatch, tmp_path, ToolError("semgrep failed"), _llm_result(Verdict.tp))
+    assert prediction.predicted_vulnerable is True
+    assert prediction.semgrep_predicted is False
+    assert prediction.llm_predicted is True
+    assert prediction.error is None
+    assert prediction.detector_errors == ["semgrep: semgrep failed"]
+
+
+def test_hybrid_prompt_uses_source_code_without_semgrep_summary(monkeypatch, tmp_path: Path):
+    _, prompts = _hybrid_prediction(monkeypatch, tmp_path, [_semgrep_finding()], _llm_result(Verdict.fp))
+    assert "SOURCE_CODE_BEGIN" in prompts[0]
+    assert "os.system(cmd)" in prompts[0]
+    assert "Normalized Semgrep findings JSON" not in prompts[0]
