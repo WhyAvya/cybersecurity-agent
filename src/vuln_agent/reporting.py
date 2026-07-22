@@ -70,6 +70,8 @@ def write_markdown(records: list[FinalFinding], output_path: Path, target_path: 
                 f"- Line: {record.line_start}",
                 f"- Rule: `{record.rule_id}`",
                 f"- CWE: `{record.normalized_cwe}`",
+                f"- Detectors: `{', '.join(record.detectors) or record.detector}`",
+                f"- Agreement: `{record.agreement_status or 'n/a'}`",
                 f"- User classification: `{record.user_classification or record.status.value}`",
                 f"- Internal verdict: `{record.analyzer_verdict.value}`",
                 f"- Model confidence: {record.confidence:.2f}",

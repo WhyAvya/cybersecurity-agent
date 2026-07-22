@@ -188,6 +188,12 @@ class FinalFinding(BaseModel):
     duration_ms: int = Field(ge=0)
     user_classification: str = ""
     model_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    detector: str = ""
+    detectors: list[str] = Field(default_factory=list)
+    agreement_status: str = ""
+    semgrep_cwe: str = "NONE"
+    llm_cwe: str = "NONE"
+    detector_errors: list[str] = Field(default_factory=list)
     group_id: str | None = None
     underlying_finding_ids: list[str] = Field(default_factory=list)
     underlying_rule_ids: list[str] = Field(default_factory=list)

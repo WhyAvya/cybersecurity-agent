@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import subprocess
 import sys
 import time
@@ -63,6 +64,8 @@ def user_classification(status: FindingStatus, verdict: Verdict, confidence: flo
         return "ERROR"
     if status == FindingStatus.rejected:
         return "REJECTED"
+    if status == FindingStatus.needs_review and verdict == Verdict.tp:
+        return "LIKELY_VULNERABLE"
     if verdict == Verdict.uncertain or status == FindingStatus.needs_review:
         return "UNCERTAIN"
     if confidence >= 0.8:
@@ -139,12 +142,17 @@ class VulnerabilityOrchestrator:
         tool_metadata = ToolMetadata(name="semgrep", config=self.settings.semgrep_config)
         if mode in {"semgrep", "semgrep_gated", "hybrid"}:
             for file_path in files:
-                findings, metadata, raw_paths = self._scan_semgrep(file_path, raw_dir)
-                tool_metadata = metadata
-                semgrep_by_file[file_path] = findings
-                manifest["raw_paths"].extend(raw_paths)
-                if mode == "semgrep":
-                    candidates.extend(self._semgrep_findings(run_id, findings, metadata))
+                try:
+                    findings, metadata, raw_paths = self._scan_semgrep(file_path, raw_dir)
+                    tool_metadata = metadata
+                    semgrep_by_file[file_path] = findings
+                    manifest["raw_paths"].extend(raw_paths)
+                    if mode in {"semgrep", "hybrid"}:
+                        candidates.extend(self._semgrep_findings(run_id, findings, metadata, review_recommended=mode == "hybrid"))
+                except ToolError as exc:
+                    error = self._detector_error(run_id, file_path, "semgrep", str(exc), tool_metadata)
+                    candidates.append(error)
+                    manifest["failures"].append({"detector": "semgrep", "file": error.relative_file, "error": str(exc)})
         if mode == "semgrep":
             return candidates, self._group_findings(run_id, candidates, tool_metadata), manifest
 
@@ -161,7 +169,7 @@ class VulnerabilityOrchestrator:
                 continue
             if mode == "llm":
                 semgrep_findings = []
-            file_candidates, raw_path = self._analyze_full_file(run_id, file_path, semgrep_findings, tool_metadata, save_raw, raw_dir)
+            file_candidates, raw_path = self._analyze_full_file(run_id, file_path, tool_metadata, save_raw, raw_dir)
             if raw_path:
                 manifest["raw_paths"].append(raw_path)
             candidates.extend(file_candidates)
@@ -170,6 +178,7 @@ class VulnerabilityOrchestrator:
     def _scan_semgrep(self, file_path: Path, raw_dir: Path | None) -> tuple[list[SemgrepFinding], ToolMetadata, list[str]]:
         if not isinstance(self.semgrep, SemgrepAdapter):
             findings, metadata = self.semgrep.scan(file_path)  # type: ignore[attr-defined]
+            findings = self._normalize_semgrep_findings(file_path, findings)
             raw_paths: list[str] = []
             if raw_dir is not None:
                 semgrep_dir = raw_dir / "semgrep"
@@ -189,6 +198,7 @@ class VulnerabilityOrchestrator:
 
         adapter = SemgrepAdapter(self.settings, runner=runner)
         findings, metadata = adapter.scan(file_path)
+        findings = self._normalize_semgrep_findings(file_path, findings)
         raw_paths: list[str] = []
         if raw_dir is not None:
             semgrep_dir = raw_dir / "semgrep"
@@ -201,15 +211,37 @@ class VulnerabilityOrchestrator:
             raw_paths.extend([str(stdout_path.relative_to(raw_dir.parent)).replace("\\", "/"), str(stderr_path.relative_to(raw_dir.parent)).replace("\\", "/")])
         return findings, metadata, raw_paths
 
-    def _semgrep_findings(self, run_id: str, findings: list[SemgrepFinding], metadata: ToolMetadata) -> list[FinalFinding]:
+    def _normalize_semgrep_findings(self, file_path: Path, findings: list[SemgrepFinding]) -> list[SemgrepFinding]:
+        normalized = []
+        selected_relative = portable_path(file_path, self.settings.allowed_scan_root)
+        root = self.settings.allowed_scan_root.resolve()
+        for finding in findings:
+            relative = self._normalize_semgrep_path(finding.relative_file, root, selected_relative)
+            updated = finding.model_copy(update={"relative_file": relative})
+            updated.finding_id = stable_finding_id(relative, updated.line_start, updated.column_start, updated.rule_id, updated.snippet)
+            normalized.append(updated)
+        return normalized
+
+    def _normalize_semgrep_path(self, reported_path: str, root: Path, selected_relative: str) -> str:
+        path_text = reported_path.replace("\\", "/")
+        absolute_like = Path(reported_path).is_absolute() or path_text.startswith("/") or re.match(r"^[A-Za-z]:/", path_text) is not None
+        if path_text and not absolute_like and not path_text.startswith("../") and "/.." not in path_text:
+            return path_text
+        try:
+            return str(Path(reported_path).resolve().relative_to(root)).replace("\\", "/")
+        except (OSError, ValueError):
+            return selected_relative
+
+    def _semgrep_findings(self, run_id: str, findings: list[SemgrepFinding], metadata: ToolMetadata, review_recommended: bool = False) -> list[FinalFinding]:
         records = []
         for finding in findings:
             analysis = AgentAnalysis(
                 verdict=Verdict.tp,
-                confidence=1.0,
+                confidence=0.75 if review_recommended else 1.0,
                 normalized_cwe=finding.normalized_cwe,
-                reasoning_summary="Semgrep reported this issue. No LLM validation was requested in semgrep mode.",
+                reasoning_summary="Semgrep reported this issue. Human review is recommended for detector-only findings." if review_recommended else "Semgrep reported this issue. No LLM validation was requested in semgrep mode.",
                 sink_evidence=finding.snippet,
+                needs_more_context=review_recommended,
             )
             records.append(self._final_from_analysis(run_id, finding, analysis, metadata, ModelMetadata(model="none", provider="none"), "semgrep"))
         return records
@@ -248,15 +280,13 @@ class VulnerabilityOrchestrator:
         self,
         run_id: str,
         file_path: Path,
-        semgrep_findings: list[SemgrepFinding],
         tool_metadata: ToolMetadata,
         save_raw: bool,
         raw_dir: Path | None,
     ) -> tuple[list[FinalFinding], str | None]:
         relative = portable_path(file_path, self.settings.allowed_scan_root)
-        semgrep_json = json.dumps([finding.model_dump() for finding in semgrep_findings], indent=2)
         code = file_path.read_text(encoding="utf-8", errors="replace")
-        prompt = build_file_analysis_prompt(relative, code, semgrep_json)
+        prompt = build_file_analysis_prompt(relative, code)
         started = time.perf_counter()
         raw_path = None
         try:
@@ -271,7 +301,7 @@ class VulnerabilityOrchestrator:
             for item in analysis.findings:
                 finding = self._finding_from_file_item(relative, item)
                 model_metadata = result.metadata.model_copy(update={"prompt_name": prompt.name, "prompt_version": prompt.version, "prompt_checksum": prompt.checksum})
-                record = self._final_from_file_finding(run_id, finding, item, tool_metadata, model_metadata, "hybrid_full_file")
+                record = self._final_from_file_finding(run_id, finding, item, tool_metadata, model_metadata, "llm_full_file")
                 record.duration_ms = int((time.perf_counter() - started) * 1000)
                 records.append(record)
             return records, raw_path
@@ -287,7 +317,7 @@ class VulnerabilityOrchestrator:
                 snippet="",
             )
             item = FileFinding(line_start=1, line_end=1, verdict=Verdict.error, confidence=0.0, normalized_cwe="NONE", reasoning_summary=f"Full-file analysis failed: {exc}")
-            record = self._final_from_file_finding(run_id, error_finding, item, tool_metadata, ModelMetadata(model=self.settings.ollama_model, endpoint=self.settings.ollama_base_url), "hybrid_full_file")
+            record = self._final_from_file_finding(run_id, error_finding, item, tool_metadata, ModelMetadata(model=self.settings.ollama_model, endpoint=self.settings.ollama_base_url), "llm_full_file")
             record.duration_ms = int((time.perf_counter() - started) * 1000)
             return [record], raw_path
 
@@ -350,6 +380,8 @@ class VulnerabilityOrchestrator:
             status = FindingStatus.needs_review
             review_reason = "Analyzer requested more context."
         classification = user_classification(status, analysis.verdict, analysis.confidence)
+        detector = "llm" if decision_source in {"llm_full_file", "hybrid_full_file", "semgrep_gated"} else decision_source
+        llm_cwe = analyzer_cwe if detector == "llm" else "NONE"
         return FinalFinding(
             run_id=run_id,
             finding_id=finding.finding_id,
@@ -379,16 +411,23 @@ class VulnerabilityOrchestrator:
             tool_metadata=tool_metadata,
             model_metadata=model_metadata,
             duration_ms=0,
+            detector=detector,
+            detectors=[detector],
+            agreement_status="single_detector",
+            semgrep_cwe=semgrep_cwe if detector == "semgrep" else "NONE",
+            llm_cwe=llm_cwe,
+            detector_errors=[analysis.reasoning_summary] if status == FindingStatus.error else [],
         )
 
     def _group_findings(self, run_id: str, records: list[FinalFinding], metadata: ToolMetadata) -> list[FinalFinding]:
-        groups: dict[tuple[str, str, int, str], list[FinalFinding]] = {}
+        groups: dict[tuple[str, str, int, str, str], list[FinalFinding]] = {}
         for record in records:
-            if record.status in {FindingStatus.rejected}:
+            if record.status in {FindingStatus.rejected, FindingStatus.error}:
                 key_status = record.status.value
             else:
                 key_status = "active"
-            bucket = (record.relative_file, record.normalized_cwe, max(1, record.line_start // 5), key_status)
+            sink = self._sink_signature(record)
+            bucket = (record.relative_file, record.normalized_cwe, self._line_bucket(record), key_status, sink)
             groups.setdefault(bucket, []).append(record)
         grouped = []
         for key, items in sorted(groups.items()):
@@ -398,11 +437,61 @@ class VulnerabilityOrchestrator:
             primary.underlying_finding_ids = sorted(item.finding_id for item in items)
             primary.underlying_rule_ids = sorted({item.rule_id for item in items})
             primary.duplicate_count = max(0, len(items) - 1)
+            primary.detectors = sorted({detector for item in items for detector in item.detectors})
+            primary.detector = "+".join(primary.detectors)
+            primary.semgrep_cwe = normalize_cwe([item.semgrep_cwe for item in items if item.semgrep_cwe != "NONE"])
+            primary.llm_cwe = normalize_cwe([item.llm_cwe for item in items if item.llm_cwe != "NONE"])
+            primary.detector_errors = [error for item in items for error in item.detector_errors]
+            primary.agreement_status = self._agreement_status(items)
+            if primary.agreement_status == "detector_disagreement":
+                primary.status = FindingStatus.needs_review
+                primary.analyzer_verdict = Verdict.uncertain
+                primary.user_classification = "UNCERTAIN"
+                primary.needs_human_review = True
+                primary.review_reason = "Detector disagreement requires human review."
             primary.finding_id = primary.group_id
             primary.line_start = min(item.line_start for item in items)
             primary.line_end = max(item.line_end for item in items)
             grouped.append(primary)
         return grouped
+
+    def _line_bucket(self, record: FinalFinding) -> int:
+        return max(1, (record.line_start - 1) // 5)
+
+    def _sink_signature(self, record: FinalFinding) -> str:
+        evidence = (record.sink_evidence or record.source_evidence or record.reasoning_summary or record.rule_id).lower()
+        return " ".join(evidence.replace('"', "'").split())[:120]
+
+    def _agreement_status(self, items: list[FinalFinding]) -> str:
+        detectors = {detector for item in items for detector in item.detectors}
+        if any(item.status == FindingStatus.error for item in items):
+            return "detector_error"
+        if detectors == {"semgrep", "llm"}:
+            statuses = {item.status for item in items}
+            verdicts = {item.analyzer_verdict for item in items}
+            if FindingStatus.rejected in statuses or Verdict.uncertain in verdicts:
+                return "detector_disagreement"
+            return "detectors_agree"
+        if detectors == {"semgrep"}:
+            return "semgrep_only"
+        if detectors == {"llm"}:
+            return "llm_only"
+        return "single_detector"
+
+    def _detector_error(self, run_id: str, file_path: Path, detector: str, error: str, metadata: ToolMetadata) -> FinalFinding:
+        relative = portable_path(file_path, self.settings.allowed_scan_root)
+        finding = SemgrepFinding(
+            finding_id=stable_finding_id(relative, 1, 0, f"{detector}.error", error),
+            relative_file=relative,
+            line_start=1,
+            line_end=1,
+            rule_id=f"{detector}.error",
+            normalized_cwe="NONE",
+            severity=Severity.unknown,
+            snippet="",
+        )
+        analysis = AgentAnalysis(verdict=Verdict.error, confidence=0.0, normalized_cwe="NONE", reasoning_summary=f"{detector} failed: {error}")
+        return self._final_from_analysis(run_id, finding, analysis, metadata.model_copy(update={"error": error}), ModelMetadata(model="none", provider=detector), detector)
 
     def _offline_findings(self, target_path: Path) -> tuple[list[FinalFinding], ToolMetadata]:
         files = [target_path] if target_path.is_file() else list(target_path.rglob("*.py"))
