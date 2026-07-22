@@ -30,6 +30,10 @@ class LLMResult:
     latency_ms: int
 
 
+class RawModel(BaseModel):
+    pass
+
+
 class LLMClient(Protocol):
     def healthcheck(self) -> HealthStatus: ...
 
@@ -55,8 +59,10 @@ class OllamaClient:
             data = response.json()
         except Exception as exc:
             return HealthStatus(False, f"Ollama unreachable: {exc}")
-        models = [item.get("name") for item in data.get("models", [])]
-        ok = self.settings.ollama_model in models or not models
+        models = [item.get("name") for item in data.get("models", []) if isinstance(item, dict)]
+        if not models:
+            return HealthStatus(False, "Ollama reachable but no models are listed")
+        ok = self.settings.ollama_model in models
         message = "Ollama reachable" if ok else f"Model not listed: {self.settings.ollama_model}"
         return HealthStatus(
             ok,
@@ -68,7 +74,7 @@ class OllamaClient:
             ),
         )
 
-    def generate_structured(self, prompt: str, schema: type[BaseModel]) -> LLMResult:
+    def generate_raw(self, prompt: str) -> LLMResult:
         payload: dict[str, Any] = {
             "model": self.settings.ollama_model,
             "prompt": prompt,
@@ -100,10 +106,6 @@ class OllamaClient:
                 raw_text = body.get("response", "")
                 if not isinstance(raw_text, str) or not raw_text.strip():
                     raise LLMError("Ollama response did not contain text")
-                try:
-                    parsed = parse_model_json(raw_text, schema)
-                except SchemaParseError:
-                    raise
                 latency_ms = int((time.perf_counter() - started) * 1000)
                 metadata = ModelMetadata(
                     model=self.settings.ollama_model,
@@ -111,9 +113,7 @@ class OllamaClient:
                     digest=body.get("model"),
                     duration_ms=latency_ms,
                 )
-                return LLMResult(parsed=parsed, raw_text=raw_text, metadata=metadata, latency_ms=latency_ms)
-            except SchemaParseError:
-                raise
+                return LLMResult(parsed=RawModel(), raw_text=raw_text, metadata=metadata, latency_ms=latency_ms)
             except (requests.Timeout, requests.ConnectionError, requests.HTTPError, ValueError, LLMError) as exc:
                 last_error = exc
                 if attempt < self.settings.ollama_max_retries:
@@ -121,6 +121,11 @@ class OllamaClient:
                     continue
                 break
         raise LLMError(f"Ollama generation failed: {last_error}") from last_error
+
+    def generate_structured(self, prompt: str, schema: type[BaseModel]) -> LLMResult:
+        result = self.generate_raw(prompt)
+        parsed = parse_model_json(result.raw_text, schema)
+        return LLMResult(parsed=parsed, raw_text=result.raw_text, metadata=result.metadata, latency_ms=result.latency_ms)
 
 
 class StaticLLMClient:

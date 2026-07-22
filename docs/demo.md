@@ -36,6 +36,8 @@ sh scripts/week6_demo.sh artifacts/final/week6-demo-local
 6. Original hybrid scan of `examples/safe_app`.
 7. Output manifest written under the artifact root.
 
+The demo command uses `--mode hybrid --save-raw`. It should produce grouped findings, raw Semgrep output, raw LLM output, and portable source paths.
+
 ## Output Fields
 
 The scan report includes status, analyzer verdict, confidence, CWE, concise evidence, remediation, and metadata. Raw and structured outputs are stored in the selected artifact directory.

@@ -39,7 +39,7 @@ def write_jsonl(records: list[FinalFinding], output_path: Path) -> None:
             handle.write(record.model_dump_json() + "\n")
 
 
-def write_markdown(records: list[FinalFinding], output_path: Path, target_path: str) -> None:
+def write_markdown(records: list[FinalFinding], output_path: Path, target_path: str, mode: str = "hybrid", underlying_count: int | None = None) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     accepted = sum(1 for item in records if item.status == FindingStatus.accepted)
     rejected = sum(1 for item in records if item.status == FindingStatus.rejected)
@@ -48,10 +48,12 @@ def write_markdown(records: list[FinalFinding], output_path: Path, target_path: 
         "# Vulnerability Scan Report",
         "",
         f"Target path: `{target_path}`",
+        f"Scan mode: `{mode}`",
         "",
         "## Summary",
         "",
-        f"- Findings: {len(records)}",
+        f"- Grouped findings: {len(records)}",
+        f"- Underlying matches: {underlying_count if underlying_count is not None else len(records)}",
         f"- Accepted: {accepted}",
         f"- Rejected: {rejected}",
         f"- Needs review: {review}",
@@ -62,15 +64,18 @@ def write_markdown(records: list[FinalFinding], output_path: Path, target_path: 
     for index, record in enumerate(records, 1):
         lines.extend(
             [
-                f"### {index}. {record.status.value}",
+                f"### {index}. {record.user_classification or record.status.value}",
                 "",
                 f"- File: `{record.relative_file}`",
                 f"- Line: {record.line_start}",
                 f"- Rule: `{record.rule_id}`",
                 f"- CWE: `{record.normalized_cwe}`",
-                f"- Verdict: `{record.analyzer_verdict.value}`",
-                f"- Confidence: {record.confidence:.2f}",
+                f"- User classification: `{record.user_classification or record.status.value}`",
+                f"- Internal verdict: `{record.analyzer_verdict.value}`",
+                f"- Model confidence: {record.confidence:.2f}",
                 f"- Priority: `{record.priority.value}`",
+                f"- Group ID: `{record.group_id or record.finding_id}`",
+                f"- Underlying rule IDs: `{', '.join(record.underlying_rule_ids)}`",
                 "",
                 record.reasoning_summary or "No reasoning summary provided.",
                 "",

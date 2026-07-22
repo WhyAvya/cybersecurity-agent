@@ -55,3 +55,23 @@ def test_ollama_connection_failure():
 
     with pytest.raises(LLMError):
         OllamaClient(Settings(ollama_max_retries=0), session=BrokenSession()).generate_structured("prompt", AgentAnalysis)
+
+
+def test_ollama_healthcheck_rejects_empty_model_list():
+    class EmptySession:
+        def get(self, *args, **kwargs):
+            return Response({"models": []})
+
+    status = OllamaClient(Settings(ollama_model="qwen2.5-coder:7b"), session=EmptySession()).healthcheck()
+    assert not status.ok
+    assert "no models" in status.message
+
+
+def test_ollama_healthcheck_requires_configured_model():
+    class WrongModelSession:
+        def get(self, *args, **kwargs):
+            return Response({"models": [{"name": "other:latest"}]})
+
+    status = OllamaClient(Settings(ollama_model="qwen2.5-coder:7b"), session=WrongModelSession()).healthcheck()
+    assert not status.ok
+    assert "Model not listed" in status.message

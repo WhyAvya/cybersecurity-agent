@@ -8,13 +8,14 @@ import shutil
 import subprocess
 import sys
 import time
+import re
 from pathlib import Path
 from typing import Callable
 
 from .config import Settings
 from .exceptions import ToolError
 from .schemas import SemgrepFinding, Severity, ToolMetadata
-from .utils import normalize_cwe, normalize_cwe_list, stable_finding_id
+from .utils import infer_cwe_from_rule, normalize_cwe, normalize_cwe_list, stable_finding_id
 
 
 CompletedProcessFactory = Callable[..., subprocess.CompletedProcess[str]]
@@ -89,7 +90,8 @@ class SemgrepAdapter:
             raise ToolError(f"Semgrep failed to start: {exc}") from exc
 
         duration_ms = int((time.perf_counter() - started) * 1000)
-        stderr = (result.stderr or "").strip()[:2000]
+        stderr_full = strip_console_noise(result.stderr or "")
+        stderr = stderr_full.strip()[:2000]
         stdout = result.stdout or ""
         if not stdout.strip():
             raise ToolError(f"Semgrep exited with {result.returncode} and no JSON output: {stderr}")
@@ -108,7 +110,9 @@ class SemgrepAdapter:
             version=None,
             config=config or self.settings.semgrep_config,
             duration_ms=duration_ms,
-            error=stderr or None,
+            error=None,
+            warnings=[stderr] if stderr else [],
+            stderr_excerpt=stderr,
         )
         return findings, metadata
 
@@ -123,6 +127,7 @@ class SemgrepAdapter:
             raw_cwes = normalize_cwe_list(metadata.get("cwe"))
             relative_file = str(record.get("path", "")).replace("\\", "/")
             rule_id = str(record.get("check_id", "UNKNOWN_RULE"))
+            normalized_cwe, _source = infer_cwe_from_rule(rule_id, normalize_cwe(raw_cwes))
             line = int(start.get("line", 1))
             column = start.get("col")
             finding_id = stable_finding_id(relative_file, line, column, rule_id, snippet)
@@ -137,9 +142,15 @@ class SemgrepAdapter:
                 column_end=end.get("col"),
                 rule_id=rule_id,
                 raw_semgrep_cwes=raw_cwes,
-                normalized_cwe=normalize_cwe(raw_cwes),
+                normalized_cwe=normalized_cwe,
                 severity=severity,
                 snippet=snippet,
             )
             deduped[finding_id] = finding
         return list(deduped.values())
+
+
+def strip_console_noise(text: str) -> str:
+    ansi = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+    cleaned = ansi.sub("", text.replace("\ufffd", ""))
+    return "".join(ch for ch in cleaned if ch == "\n" or ch == "\t" or ord(ch) >= 32)

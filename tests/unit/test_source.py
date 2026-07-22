@@ -4,7 +4,7 @@ import pytest
 
 from vuln_agent.config import Settings
 from vuln_agent.exceptions import SecurityPolicyError
-from vuln_agent.source import fetch_context, iter_source_files, resolve_scan_path
+from vuln_agent.source import fetch_context, iter_source_files, resolve_scan_path, select_source_files
 
 
 def test_context_boundaries(tmp_path: Path):
@@ -30,3 +30,23 @@ def test_iter_source_files_filters_extensions_and_excludes(tmp_path: Path):
     (cache / "bad.py").write_text("", encoding="utf-8")
     settings = Settings(allowed_scan_root=tmp_path)
     assert iter_source_files(tmp_path, settings) == [tmp_path / "app.py"]
+
+
+def test_select_source_files_enforces_max_files_deterministically(tmp_path: Path):
+    for name in ["b.py", "a.py", "c.py"]:
+        (tmp_path / name).write_text("", encoding="utf-8")
+    selection = select_source_files(tmp_path, Settings(allowed_scan_root=tmp_path, max_files_per_scan=2))
+    assert [path.name for path in selection.files] == ["a.py", "b.py"]
+    assert selection.truncated
+
+
+def test_rejects_direct_symlink_target(tmp_path: Path):
+    target = tmp_path / "app.py"
+    target.write_text("", encoding="utf-8")
+    link = tmp_path / "link.py"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation unavailable")
+    with pytest.raises(SecurityPolicyError):
+        resolve_scan_path(link, Settings(allowed_scan_root=tmp_path))

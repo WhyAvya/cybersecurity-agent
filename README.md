@@ -34,6 +34,10 @@ flowchart LR
 - `semgrep_gated`: Semgrep runs first; the LLM only analyzes cases where Semgrep reports at least one finding.
 - `hybrid`: Semgrep findings are supplied as evidence while the source code is also available to the reasoning workflow. Absence of a Semgrep finding is not intended to be treated as proof of safety in the benchmark hybrid implementation.
 
+The hardened scanner is a post-Week-6 engineering revision. Frozen benchmark metrics remain tied to their frozen implementations and evaluation sets.
+
+User scans report grouped findings and user-facing classifications such as `VULNERABLE`, `LIKELY_VULNERABLE`, `REJECTED`, `UNCERTAIN`, and `ERROR`; they do not claim benchmark TP/FP ground truth for arbitrary files. Model confidence is uncalibrated model-reported confidence.
+
 ## Technology Stack
 
 Python 3.10, Pydantic, Requests, PyYAML, Pytest, Docker, Semgrep, Ollama, and `qwen2.5-coder:7b`.
@@ -84,6 +88,7 @@ docker run --rm -v "${PWD}:/work" -w /work --user root `
   -e OLLAMA_BASE_URL=http://host.docker.internal:11434 `
   -e OLLAMA_MODEL=qwen2.5-coder:7b `
   cybersecurity-agent-app:latest scan examples/vulnerable_app `
+  --mode hybrid --save-raw --max-files 10 `
   --output-dir artifacts/reports/demo_vulnerable
 ```
 
@@ -155,13 +160,25 @@ Use this project to support defensive review, benchmarking, and research. Do not
 
 ## Repository Structure
 
-- `src/vuln_agent/`: supported package
+- `src/vuln_agent/`: supported package and authoritative runtime
 - `configs/`: YAML configuration
 - `examples/`: demo targets
 - `docs/`: architecture, final evaluation, demo, recommendations
 - `tests/`: unit and integration tests
 - `artifacts/`: generated and frozen evidence, ignored by Git
 - `scripts/`: Week 6 demo scripts
+
+Historical root-level modules such as `agents/`, `llm/`, `logger/`, `tools/`, `schemas/`, `pipeline.py`, and `scan.py` are legacy research material unless explicitly imported by `src/vuln_agent/`. They are not the supported scanner runtime.
+
+## Submission Packaging
+
+Create a clean source archive after committing/tagging:
+
+```powershell
+.\scripts\create_submission_archives.ps1 -Ref week6-final-complete
+```
+
+Use `-EvidenceArtifact artifacts/final/20260721T143559Z-week6-final` to create a separate evidence archive. Generated ZIP files are ignored.
 
 ## Troubleshooting
 

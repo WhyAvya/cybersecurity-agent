@@ -33,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--semgrep-config")
     scan.add_argument("--model")
     scan.add_argument("--max-files", type=int)
+    scan.add_argument("--mode", choices=["semgrep", "llm", "semgrep_gated", "hybrid"], default="hybrid")
     scan.add_argument("--offline", action="store_true")
     scan.add_argument("--save-raw", action="store_true")
 
@@ -92,8 +93,16 @@ def scan(args: argparse.Namespace) -> int:
         args.path,
         Path(args.output_dir) if args.output_dir else None,
         offline=args.offline,
+        mode=args.mode,
+        save_raw=args.save_raw,
     )
-    print(f"Findings: {len(records)}")
+    underlying = 0
+    report_path = output_dir / "raw_findings.jsonl"
+    if report_path.exists():
+        underlying = sum(1 for line in report_path.read_text(encoding="utf-8").splitlines() if line.strip())
+    print(f"Mode: {args.mode}")
+    print(f"Grouped findings: {len(records)}")
+    print(f"Underlying matches: {underlying or len(records)}")
     print(f"Output: {output_dir}")
     return 0
 

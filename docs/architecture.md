@@ -59,6 +59,12 @@ flowchart TD
 
 Tool errors, schema errors, and timeouts are recorded as explicit rows rather than converted into safe predictions. Long-running experiments use checkpoint JSON files and unique `(configuration, case_id)` or `(mode, case_id)` keys to avoid rerunning completed work.
 
+## Hardened Scanner Notes
+
+The post-Week-6 scanner exposes explicit `--mode` values: `semgrep`, `llm`, `semgrep_gated`, and `hybrid`. `--save-raw` stores Semgrep stdout/stderr and LLM raw responses under `raw/`. `--max-files` is enforced during source selection. Primary reports use repository-relative paths and grouped findings, while `raw_findings.jsonl` preserves underlying matches for auditability.
+
+Semgrep metadata warnings are separated from real tool errors. CWE normalization preserves raw Semgrep CWE values and marks conservative rule-family inference as rule inference. Empty or missing Ollama model lists fail health checks.
+
 ## Human Review
 
 The project produces automatic classifications and review queues. It does not claim human review unless a human has actually reviewed the case.

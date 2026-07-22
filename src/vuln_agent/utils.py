@@ -83,3 +83,20 @@ def stable_finding_id(
         ]
     )
     return "finding-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def infer_cwe_from_rule(rule_id: str, existing_cwe: str = "NONE") -> tuple[str, str]:
+    normalized = normalize_cwe(existing_cwe)
+    rule = rule_id.lower()
+    generic = normalized in {"NONE", "CWE-704"}
+    if not generic:
+        return normalized, "provided"
+    if any(token in rule for token in ("sql", "sqli")):
+        return "CWE-089", "rule_inference"
+    if any(token in rule for token in ("command", "subprocess", "shell", "os-system", "exec")):
+        return "CWE-078", "rule_inference"
+    if any(token in rule for token in ("path-traversal", "path_traversal", "directory-traversal")):
+        return "CWE-022", "rule_inference"
+    if "debug" in rule:
+        return "CWE-489", "rule_inference"
+    return normalized, "provided" if normalized != "NONE" else "unknown"

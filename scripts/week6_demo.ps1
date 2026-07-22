@@ -29,10 +29,10 @@ $safeOut = Join-Path $ArtifactRoot "demo_safe"
 $containerVulnOut = ($vulnOut -replace "\\", "/")
 $containerSafeOut = ($safeOut -replace "\\", "/")
 
-docker run --rm -v "${PWD}:/work" -w /work --user root -e OLLAMA_BASE_URL=http://host.docker.internal:11434 -e OLLAMA_MODEL=qwen2.5-coder:7b $ImageName scan examples/vulnerable_app --output-dir $containerVulnOut
+docker run --rm -v "${PWD}:/work" -w /work --user root -e OLLAMA_BASE_URL=http://host.docker.internal:11434 -e OLLAMA_MODEL=qwen2.5-coder:7b $ImageName scan examples/vulnerable_app --mode hybrid --save-raw --output-dir $containerVulnOut
 if ($LASTEXITCODE -ne 0) { Fail "Vulnerable demo scan failed." }
 
-docker run --rm -v "${PWD}:/work" -w /work --user root -e OLLAMA_BASE_URL=http://host.docker.internal:11434 -e OLLAMA_MODEL=qwen2.5-coder:7b $ImageName scan examples/safe_app --output-dir $containerSafeOut
+docker run --rm -v "${PWD}:/work" -w /work --user root -e OLLAMA_BASE_URL=http://host.docker.internal:11434 -e OLLAMA_MODEL=qwen2.5-coder:7b $ImageName scan examples/safe_app --mode hybrid --save-raw --output-dir $containerSafeOut
 if ($LASTEXITCODE -ne 0) { Fail "Safe demo scan failed." }
 
 $manifest = @{

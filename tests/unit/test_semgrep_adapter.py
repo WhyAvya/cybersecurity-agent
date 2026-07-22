@@ -72,7 +72,9 @@ def test_semgrep_accepts_valid_json_with_return_code_one(monkeypatch):
 
     findings, metadata = SemgrepAdapter(Settings(), runner=runner).scan("app.py")
     assert findings == []
-    assert metadata.error == "no findings"
+    assert metadata.error is None
+    assert metadata.warnings == ["no findings"]
+    assert metadata.stderr_excerpt == "no findings"
 
 
 def test_semgrep_missing_binary(monkeypatch, tmp_path):

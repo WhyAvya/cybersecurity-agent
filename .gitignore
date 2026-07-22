@@ -26,3 +26,5 @@ project_structure.txt
 # Generated scan reports
 reports/*.jsonl
 reports/*.md
+submission_archives/
+*.zip

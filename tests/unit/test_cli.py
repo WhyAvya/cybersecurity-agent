@@ -47,6 +47,28 @@ def test_main_evaluate_routes_to_runner(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert "Evaluation output:" in capsys.readouterr().out
 
 
+def test_scan_mode_default_and_save_raw_route(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    calls = {}
+
+    class Orchestrator:
+        def __init__(self, settings):
+            pass
+
+        def scan(self, path, output_dir, offline=False, mode="hybrid", save_raw=False):
+            calls.update({"path": path, "mode": mode, "save_raw": save_raw})
+            out = tmp_path / "out"
+            out.mkdir()
+            (out / "raw_findings.jsonl").write_text("", encoding="utf-8")
+            return [], out
+
+    monkeypatch.setattr(cli, "_settings_from_args", lambda args: Settings(report_dir=tmp_path))
+    monkeypatch.setattr(cli, "VulnerabilityOrchestrator", Orchestrator)
+    assert cli.main(["scan", "examples/vulnerable_app", "--save-raw"]) == 0
+    assert calls["mode"] == "hybrid"
+    assert calls["save_raw"] is True
+    assert "Grouped findings:" in capsys.readouterr().out
+
+
 def test_report_requires_existing_evaluation_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     monkeypatch.setattr(cli, "_settings_from_args", lambda args: Settings(evaluation_dir=tmp_path))
 

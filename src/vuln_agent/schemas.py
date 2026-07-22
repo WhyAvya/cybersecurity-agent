@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 SCHEMA_VERSION = "1.0"
@@ -63,6 +63,8 @@ class ToolMetadata(BaseModel):
     config: str | None = None
     duration_ms: int | None = Field(default=None, ge=0)
     error: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    stderr_excerpt: str = ""
 
 
 class ModelMetadata(BaseModel):
@@ -123,6 +125,38 @@ class AgentAnalysis(BaseModel):
     needs_more_context: bool = False
 
 
+class FileFinding(BaseModel):
+    line_start: int = Field(ge=1)
+    line_end: int = Field(ge=1)
+    verdict: Verdict
+    confidence: float = Field(ge=0.0, le=1.0)
+    normalized_cwe: str = "NONE"
+    reasoning_summary: str
+    remediation: str = ""
+    source_evidence: str = ""
+    sink_evidence: str = ""
+    data_flow_evidence: str = ""
+    sanitization_evidence: str = ""
+    needs_more_context: bool = False
+
+    @field_validator(
+        "reasoning_summary",
+        "remediation",
+        "source_evidence",
+        "sink_evidence",
+        "data_flow_evidence",
+        "sanitization_evidence",
+        mode="before",
+    )
+    @classmethod
+    def _empty_string_for_null_evidence(cls, value: Any) -> Any:
+        return "" if value is None else value
+
+
+class FileAnalysis(BaseModel):
+    findings: list[FileFinding] = Field(default_factory=list)
+
+
 class FinalFinding(BaseModel):
     run_id: str
     finding_id: str
@@ -152,6 +186,12 @@ class FinalFinding(BaseModel):
     tool_metadata: ToolMetadata
     model_metadata: ModelMetadata
     duration_ms: int = Field(ge=0)
+    user_classification: str = ""
+    model_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    group_id: str | None = None
+    underlying_finding_ids: list[str] = Field(default_factory=list)
+    underlying_rule_ids: list[str] = Field(default_factory=list)
+    duplicate_count: int = 0
 
 
 class ScanSummary(BaseModel):
