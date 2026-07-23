@@ -291,6 +291,102 @@ def test_llm_mode_does_not_call_semgrep(tmp_path: Path):
     assert records[0].user_classification == "VULNERABLE"
 
 
+def test_llm_location_validation_moves_uncertain_allowlist_finding_to_evidence_line(tmp_path: Path):
+    source = tmp_path / "app.py"
+    source.write_text(
+        "\n".join(
+            [
+                "import subprocess",
+                "",
+                "allowed_commands = {",
+                '    "status": ["git", "status"],',
+                '    "version": ["python", "--version"],',
+                "}",
+                "",
+                'choice = input("Choose command: ")',
+                "",
+                "if choice in allowed_commands:",
+                "    subprocess.run(",
+                "        allowed_commands[choice],",
+                "        check=True,",
+                "        shell=False,",
+                "    )",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    settings = Settings(allowed_scan_root=tmp_path, report_dir=tmp_path / "reports")
+    llm_finding = FileFinding(
+        line_start=6,
+        line_end=6,
+        verdict=Verdict.uncertain,
+        confidence=0.5,
+        normalized_cwe="CWE-078",
+        sink_evidence="subprocess.run(",
+        reasoning_summary="subprocess call needs review",
+    )
+
+    records, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(source, mode="llm")
+
+    assert records[0].line_start == 11
+    assert records[0].line_end == 11
+    assert records[0].location_is_approximate is False
+    assert records[0].original_start_line == 6
+
+
+def test_llm_unverified_location_is_marked_approximate(tmp_path: Path):
+    source = tmp_path / "app.py"
+    source.write_text("print('safe')\n", encoding="utf-8")
+    settings = Settings(allowed_scan_root=tmp_path, report_dir=tmp_path / "reports")
+    llm_finding = FileFinding(line_start=1, line_end=1, verdict=Verdict.uncertain, confidence=0.2, normalized_cwe="CWE-078", reasoning_summary="ambiguous sink")
+
+    records, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(source, mode="llm")
+
+    assert records[0].line_start == 1
+    assert records[0].location_is_approximate is True
+    assert records[0].location_note
+
+
+def test_llm_out_of_range_location_is_bounded_and_approximate(tmp_path: Path):
+    source = tmp_path / "app.py"
+    source.write_text("import os\nos.system(user_input)\n", encoding="utf-8")
+    settings = Settings(allowed_scan_root=tmp_path, report_dir=tmp_path / "reports")
+    llm_finding = FileFinding(line_start=99, line_end=0, verdict=Verdict.uncertain, confidence=0.4, normalized_cwe="CWE-078", reasoning_summary="bad location")
+
+    records, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(source, mode="llm")
+
+    assert records[0].line_start == 1
+    assert records[0].line_end == 2
+    assert records[0].location_is_approximate is True
+    assert records[0].original_start_line == 99
+    assert records[0].original_end_line == 0
+
+
+def test_llm_vulnerable_os_system_regression_remains_strong_cwe_078(tmp_path: Path):
+    source = tmp_path / "app.py"
+    source.write_text("import os\nuser_input = input('Command: ')\nos.system(user_input)\n", encoding="utf-8")
+    settings = Settings(allowed_scan_root=tmp_path, report_dir=tmp_path / "reports")
+    llm_finding = FileFinding(
+        line_start=3,
+        line_end=3,
+        verdict=Verdict.tp,
+        confidence=1.0,
+        normalized_cwe="CWE-078",
+        sink_evidence="os.system(user_input)",
+        data_flow_evidence="user_input reaches os.system",
+        reasoning_summary="user input reaches shell command execution",
+    )
+
+    records, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(source, mode="llm")
+
+    assert records[0].normalized_cwe == "CWE-078"
+    assert records[0].user_classification == "VULNERABLE"
+    assert records[0].confidence == 1.0
+    assert records[0].line_start == 3
+    assert records[0].location_is_approximate is False
+
+
 def test_grouping_deduplicates_adjacent_rules(tmp_path: Path):
     source = tmp_path / "app.py"
     source.write_text("import os\nos.system('x')\n", encoding="utf-8")

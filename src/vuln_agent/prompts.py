@@ -72,6 +72,19 @@ Independently inspect the full file. Return JSON only. Do not reveal private
 chain-of-thought. Do not invent identifiers, functions, evidence, rule IDs, or
 line numbers.
 
+Trace source to sink before classifying: identify the exact untrusted value,
+whether it reaches the dangerous sink directly, and whether guard conditions,
+validation, sanitization, safe wrappers, or fixed allowlists dominate the sink.
+For command execution, distinguish command construction from command selection.
+Consider shell=True versus shell=False, fixed argument arrays, and predefined
+safe values. Do not classify code as command injection merely because
+subprocess.run is used. If user input only selects from a fixed allowlist of
+predefined argument arrays and shell=False is used, treat that as a strong
+mitigating control unless you can identify a concrete bypass. Return UNCERTAIN
+when evidence is ambiguous, and SAFE by omitting a finding when fixed allowlists
+and shell=False prevent attacker control. Provide concise evidence text and the
+most relevant sink line for each reported finding.
+
 Return exactly one JSON object with a findings array. The array may be empty
 only when no supported vulnerability finding exists. Each finding must include:
 line_start, line_end, verdict (TP, FP, UNCERTAIN, ERROR), confidence (number 0

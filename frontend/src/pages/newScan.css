@@ -1,0 +1,114 @@
+.new-scan-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.source-workbench,
+.scan-config,
+.source-summary {
+  padding: var(--space-5);
+}
+
+.scan-config {
+  position: sticky;
+  top: 112px;
+  display: grid;
+  gap: var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface-glass);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: var(--blur);
+}
+
+.scan-config label,
+.source-panel label {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.scan-config input,
+.scan-config select,
+.source-panel input,
+.source-panel select {
+  min-height: 44px;
+  border: 1px solid var(--border-solid);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--text-primary);
+  padding: 0 var(--space-4);
+}
+
+.source-panel {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.editor-shell {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  min-height: 360px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  background: var(--surface-technical);
+}
+
+.editor-shell pre,
+.editor-shell textarea {
+  margin: 0;
+  border: 0;
+  color: #f5f7f8;
+  font: 0.95rem/1.55 "SFMono-Regular", Consolas, monospace;
+}
+
+.editor-shell pre {
+  padding: var(--space-4) var(--space-3);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(245, 247, 248, 0.44);
+  text-align: right;
+  user-select: none;
+}
+
+.editor-shell textarea {
+  width: 100%;
+  resize: vertical;
+  outline: none;
+  background: transparent;
+  padding: var(--space-4);
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.button-row button,
+.icon-text-button {
+  min-height: 40px;
+  border: 1px solid var(--border-solid);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--text-primary);
+  padding: 0 var(--space-4);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+@media (max-width: 980px) {
+  .new-scan-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .scan-config {
+    position: static;
+  }
+}

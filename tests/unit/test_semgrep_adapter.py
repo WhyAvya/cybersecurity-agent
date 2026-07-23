@@ -50,16 +50,16 @@ def test_semgrep_parses_and_deduplicates(monkeypatch):
     assert metadata.name == "semgrep"
     assert len(calls) == 1
     command, kwargs = calls[0]
-    assert command == [
+    assert command[:6] == [
         "semgrep",
         "--json",
         "--metrics",
         "off",
         "--disable-version-check",
         "--config",
-        "p/python",
-        "app.py",
     ]
+    assert command[6].endswith("semgrep-rules\\python") or command[6].endswith("semgrep-rules/python")
+    assert command[7] == "app.py"
     assert kwargs["env"]["SEMGREP_SEND_METRICS"] == "off"
     assert kwargs["timeout"] == Settings().semgrep_timeout_seconds
 
@@ -126,3 +126,16 @@ def test_semgrep_timeout_raises_tool_error(monkeypatch):
 
     with pytest.raises(ToolError, match="Semgrep timed out"):
         SemgrepAdapter(Settings(semgrep_timeout_seconds=3), runner=runner).scan("app.py")
+
+
+def test_semgrep_version_timeout_returns_unavailable_status(monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda _: "semgrep")
+
+    def runner(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    status = SemgrepAdapter(Settings(semgrep_version_timeout_seconds=2), runner=runner).version_status()
+
+    assert status["status"] == "timeout"
+    assert status["version"] is None
+    assert "timed out after 2" in str(status["error"])

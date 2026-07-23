@@ -1,0 +1,222 @@
+.source-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.44);
+  padding: var(--space-2);
+}
+
+.source-tab {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  transition: background var(--motion-fast), color var(--motion-fast), transform var(--motion-fast);
+}
+
+.source-tab--active {
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--text-primary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.validation {
+  width: fit-content;
+  margin: 0;
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: rgba(255, 255, 255, 0.78);
+  font-size: 0.88rem;
+}
+
+.validation--success { color: var(--success); }
+.validation--warning { color: var(--warning); }
+.validation--danger { color: var(--danger); }
+
+.drop-zone {
+  display: grid;
+  place-items: center;
+  gap: var(--space-3);
+  min-height: 210px;
+  border: 1px dashed rgba(95, 102, 109, 0.32);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text-secondary);
+  text-align: center;
+  padding: var(--space-6);
+  transition: transform var(--motion-fast), border-color var(--motion-fast), background var(--motion-fast);
+}
+
+.drop-zone:hover {
+  transform: translateY(-1px);
+  border-color: rgba(125, 146, 125, 0.64);
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.drop-zone input {
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.file-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 48px;
+  border: 1px solid var(--border-solid);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.88);
+  padding: var(--space-2) var(--space-3);
+}
+
+.file-list li > div {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.file-list span {
+  overflow-wrap: anywhere;
+}
+
+.file-list small,
+.muted-line {
+  color: var(--text-muted);
+}
+
+.file-list button,
+.icon-text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.source-summary {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.summary-head h2,
+.summary-head p {
+  margin: 0;
+}
+
+.summary-head p:not(.eyebrow) {
+  color: var(--text-secondary);
+}
+
+.summary-grid,
+.repo-meta,
+.config-limits {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.summary-grid div,
+.repo-meta div,
+.config-limits div {
+  display: grid;
+  gap: var(--space-1);
+  border: 1px solid var(--border-solid);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.72);
+  padding: var(--space-3);
+}
+
+.summary-grid strong,
+.repo-meta dt,
+.config-limits dt {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  text-transform: capitalize;
+}
+
+.repo-meta {
+  margin: 0;
+}
+
+.repo-meta dd,
+.config-limits dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mode-selector {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.mode-selector legend {
+  margin-bottom: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.mode-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  border: 1px solid var(--border-solid);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.72);
+  padding: var(--space-3);
+  transition: transform var(--motion-fast), border-color var(--motion-fast), background var(--motion-fast);
+}
+
+.mode-option--selected {
+  border-color: rgba(125, 146, 125, 0.72);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.mode-option span {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.mode-option small,
+.mode-option em {
+  color: var(--text-secondary);
+  font-style: normal;
+}
+
+.checkbox-row {
+  display: flex !important;
+  align-items: center;
+}
+
+@media (max-width: 720px) {
+  .source-tabs,
+  .summary-grid,
+  .repo-meta,
+  .config-limits {
+    grid-template-columns: 1fr;
+  }
+
+  .file-list li {
+    grid-template-columns: 1fr;
+  }
+}

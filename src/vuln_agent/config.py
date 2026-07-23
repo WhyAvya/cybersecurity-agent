@@ -29,8 +29,9 @@ class Settings(BaseModel):
     ollama_seed: int | None = 42
     ollama_num_ctx: int | None = Field(default=2048, ge=512)
     semgrep_binary: str = "semgrep"
-    semgrep_config: str = "p/python"
+    semgrep_config: str = "semgrep-rules/python"
     semgrep_timeout_seconds: float = Field(default=120, gt=0)
+    semgrep_version_timeout_seconds: float = Field(default=10, gt=0)
     semgrep_no_git_ignore: bool = False
     context_lines_before: int = Field(default=10, ge=0, le=200)
     context_lines_after: int = Field(default=10, ge=0, le=200)

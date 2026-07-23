@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,76 @@ from .utils import infer_cwe_from_rule, normalize_cwe, parse_model_json, stable_
 
 
 SCAN_MODES = ("semgrep", "llm", "semgrep_gated", "hybrid")
+
+
+@dataclass(frozen=True)
+class ValidatedLocation:
+    line_start: int
+    line_end: int
+    is_approximate: bool
+    note: str | None
+    original_start_line: int | None
+    original_end_line: int | None
+
+
+def _bounded_line(value: int, total_lines: int) -> int:
+    return min(max(value, 1), max(total_lines, 1))
+
+
+def _evidence_candidates(item: FileFinding) -> list[str]:
+    candidates = [
+        item.sink_evidence,
+        item.data_flow_evidence,
+        item.source_evidence,
+        item.sanitization_evidence,
+        item.reasoning_summary,
+    ]
+    cleaned: list[str] = []
+    for candidate in candidates:
+        text = " ".join((candidate or "").strip().split())
+        if len(text) >= 4 and text not in cleaned:
+            cleaned.append(text)
+    return cleaned
+
+
+def validate_file_finding_location(item: FileFinding, code: str) -> ValidatedLocation:
+    lines = code.splitlines() or [""]
+    total = len(lines)
+    original_start = item.line_start if isinstance(item.line_start, int) else None
+    original_end = item.line_end if isinstance(item.line_end, int) else None
+    start = _bounded_line(original_start if original_start is not None else 1, total)
+    end = _bounded_line(original_end if original_end is not None else start, total)
+    if start > end:
+        start, end = end, start
+
+    evidence = _evidence_candidates(item)
+    matches: list[tuple[int, int, str]] = []
+    for snippet in evidence:
+        snippet_lines = [line.strip() for line in snippet.splitlines() if line.strip()]
+        if not snippet_lines:
+            continue
+        if len(snippet_lines) == 1:
+            needle = snippet_lines[0]
+            for index, source_line in enumerate(lines, 1):
+                if needle in source_line.strip():
+                    matches.append((index, index, snippet))
+        else:
+            normalized_snippet = "\n".join(snippet_lines)
+            for index in range(0, max(0, len(lines) - len(snippet_lines) + 1)):
+                window = "\n".join(line.strip() for line in lines[index : index + len(snippet_lines)])
+                if normalized_snippet in window:
+                    matches.append((index + 1, index + len(snippet_lines), snippet))
+
+    if matches:
+        reference = original_start if isinstance(original_start, int) else None
+        if reference is not None:
+            match_start, match_end, _snippet = min(matches, key=lambda match: abs(match[0] - reference))
+        else:
+            match_start, match_end, _snippet = matches[0]
+        return ValidatedLocation(match_start, match_end, False, None, original_start, original_end)
+
+    note = "Location could not be verified from returned evidence."
+    return ValidatedLocation(start, end, True, note, original_start, original_end)
 
 
 def current_git_metadata(root: Path) -> dict[str, object]:
@@ -299,10 +370,15 @@ class VulnerabilityOrchestrator:
             analysis = FileAnalysis.model_validate(result.parsed.model_dump())
             records = []
             for item in analysis.findings:
-                finding = self._finding_from_file_item(relative, item)
+                location = validate_file_finding_location(item, code)
+                finding = self._finding_from_file_item(relative, item, location)
                 model_metadata = result.metadata.model_copy(update={"prompt_name": prompt.name, "prompt_version": prompt.version, "prompt_checksum": prompt.checksum})
                 record = self._final_from_file_finding(run_id, finding, item, tool_metadata, model_metadata, "llm_full_file")
                 record.duration_ms = int((time.perf_counter() - started) * 1000)
+                record.location_is_approximate = location.is_approximate
+                record.location_note = location.note
+                record.original_start_line = location.original_start_line
+                record.original_end_line = location.original_end_line
                 records.append(record)
             return records, raw_path
         except (LLMError, SchemaParseError, ValueError) as exc:
@@ -333,15 +409,13 @@ class VulnerabilityOrchestrator:
         path.write_text(text, encoding="utf-8")
         return str(path.relative_to(raw_dir.parent)).replace("\\", "/")
 
-    def _finding_from_file_item(self, relative: str, item: FileFinding) -> SemgrepFinding:
-        if item.line_end < item.line_start:
-            raise ValueError("line_end must be >= line_start")
+    def _finding_from_file_item(self, relative: str, item: FileFinding, location: ValidatedLocation) -> SemgrepFinding:
         rule = "llm.full-file"
         return SemgrepFinding(
-            finding_id=stable_finding_id(relative, item.line_start, 0, rule, item.sink_evidence or item.reasoning_summary),
+            finding_id=stable_finding_id(relative, location.line_start, 0, rule, item.sink_evidence or item.reasoning_summary),
             relative_file=relative,
-            line_start=item.line_start,
-            line_end=item.line_end,
+            line_start=location.line_start,
+            line_end=location.line_end,
             rule_id=rule,
             raw_semgrep_cwes=[],
             normalized_cwe=normalize_cwe(item.normalized_cwe),
@@ -450,8 +524,17 @@ class VulnerabilityOrchestrator:
                 primary.needs_human_review = True
                 primary.review_reason = "Detector disagreement requires human review."
             primary.finding_id = primary.group_id
-            primary.line_start = min(item.line_start for item in items)
-            primary.line_end = max(item.line_end for item in items)
+            if any(item.location_is_approximate for item in items):
+                primary.location_is_approximate = True
+                primary.location_note = primary.location_note or "One or more grouped locations could not be verified from evidence."
+            location_pairs = {(item.line_start, item.line_end) for item in items}
+            original_pairs = {(item.original_start_line, item.original_end_line) for item in items if item.original_start_line is not None or item.original_end_line is not None}
+            if len(location_pairs) > 1 and primary.location_is_approximate:
+                primary.location_note = "Grouped findings include approximate or differing locations; displayed line is the highest-confidence primary finding."
+            if len(original_pairs) > 1:
+                primary.original_start_line = None
+                primary.original_end_line = None
+                primary.location_note = primary.location_note or "Grouped findings came from differing original model locations."
             grouped.append(primary)
         return grouped
 

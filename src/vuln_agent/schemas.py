@@ -126,8 +126,8 @@ class AgentAnalysis(BaseModel):
 
 
 class FileFinding(BaseModel):
-    line_start: int = Field(ge=1)
-    line_end: int = Field(ge=1)
+    line_start: int
+    line_end: int
     verdict: Verdict
     confidence: float = Field(ge=0.0, le=1.0)
     normalized_cwe: str = "NONE"
@@ -164,6 +164,10 @@ class FinalFinding(BaseModel):
     relative_file: str
     line_start: int = Field(ge=1)
     line_end: int = Field(ge=1)
+    location_is_approximate: bool = False
+    location_note: str | None = None
+    original_start_line: int | None = None
+    original_end_line: int | None = None
     rule_id: str
     raw_semgrep_cwes: list[str] = Field(default_factory=list)
     normalized_cwe: str

@@ -1,0 +1,19 @@
+rules:
+  - id: vuln-agent.python.command-injection.input-to-os-system
+    languages:
+      - python
+    severity: ERROR
+    mode: taint
+    message: User-controlled input flows into os.system, which can execute attacker-controlled shell commands.
+    pattern-sources:
+      - pattern: input(...)
+    pattern-sinks:
+      - pattern: os.system(...)
+    metadata:
+      cwe:
+        - "CWE-078"
+      category: security
+      confidence: HIGH
+      references:
+        - https://cwe.mitre.org/data/definitions/78.html
+      rationale: Detects direct data flow from Python input() to os.system(). This intentionally does not flag fixed allowlisted subprocess.run(..., shell=False) argument arrays.

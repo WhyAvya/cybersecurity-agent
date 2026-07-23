@@ -13,6 +13,11 @@ artifacts/
 .scan_runtime/
 .vscode/
 data/BenchmarkPython/
+node_modules/
+dist/
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
 
 # Temporary development scripts
 test_qwen.py

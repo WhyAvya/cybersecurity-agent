@@ -39,9 +39,13 @@ class SemgrepAdapter:
         return None
 
     def version(self) -> str | None:
+        status = self.version_status()
+        return status.get("version")
+
+    def version_status(self) -> dict[str, str | None]:
         executable = self.executable_path()
         if executable is None:
-            return None
+            return {"status": "unavailable", "version": None, "error": "Semgrep binary not found"}
         try:
             result = self.runner(
                 [executable, "--version"],
@@ -49,16 +53,22 @@ class SemgrepAdapter:
                 text=True,
                 encoding="utf-8",
                 errors="ignore",
-                timeout=10,
+                timeout=self.settings.semgrep_version_timeout_seconds,
             )
-        except Exception:
-            return None
-        return (result.stdout or result.stderr).strip() or None
+        except subprocess.TimeoutExpired:
+            return {"status": "timeout", "version": None, "error": f"Semgrep version check timed out after {self.settings.semgrep_version_timeout_seconds}s"}
+        except OSError as exc:
+            return {"status": "unavailable", "version": None, "error": f"Semgrep failed to start: {exc}"}
+        version = (result.stdout or result.stderr).strip() or None
+        if result.returncode != 0:
+            return {"status": "unavailable", "version": version, "error": f"Semgrep version exited with {result.returncode}"}
+        return {"status": "ok" if version else "unavailable", "version": version, "error": None if version else "Semgrep version output was empty"}
 
     def scan(self, target_path: str | Path, config: str | None = None) -> tuple[list[SemgrepFinding], ToolMetadata]:
         executable = self.executable_path()
         if executable is None:
             raise ToolError(f"Semgrep binary not found: {self.settings.semgrep_binary}")
+        resolved_config = self._resolve_config(config or self.settings.semgrep_config)
 
         command = [
             executable,
@@ -67,7 +77,7 @@ class SemgrepAdapter:
             "off",
             "--disable-version-check",
             "--config",
-            config or self.settings.semgrep_config,
+            resolved_config,
             str(target_path),
         ]
         if self.settings.semgrep_no_git_ignore:
@@ -108,13 +118,26 @@ class SemgrepAdapter:
         metadata = ToolMetadata(
             name="semgrep",
             version=None,
-            config=config or self.settings.semgrep_config,
+            config=resolved_config,
             duration_ms=duration_ms,
             error=None,
             warnings=[stderr] if stderr else [],
             stderr_excerpt=stderr,
         )
         return findings, metadata
+
+    def _resolve_config(self, config: str) -> str:
+        config_path = Path(config)
+        if config_path.is_absolute() or _looks_like_registry_config(config):
+            return config
+        candidates = [
+            Path.cwd() / config_path,
+            Path(__file__).resolve().parents[2] / config_path,
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+        return config
 
     def _parse_results(self, results: list[dict]) -> list[SemgrepFinding]:
         deduped: dict[str, SemgrepFinding] = {}
@@ -154,3 +177,7 @@ def strip_console_noise(text: str) -> str:
     ansi = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
     cleaned = ansi.sub("", text.replace("\ufffd", ""))
     return "".join(ch for ch in cleaned if ch == "\n" or ch == "\t" or ord(ch) >= 32)
+
+
+def _looks_like_registry_config(config: str) -> bool:
+    return config.startswith(("p/", "r/", "https://", "http://"))

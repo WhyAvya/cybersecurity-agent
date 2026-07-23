@@ -26,10 +26,19 @@ def timed(name: str, fn):
 def health_payload(scanner: Settings, web: WebSettings, active_scans: int) -> dict:
     semgrep = SemgrepAdapter(scanner)
     ollama = OllamaClient(scanner)
+    def semgrep_check() -> dict:
+        status = semgrep.version_status()
+        return {
+            "status": "ok" if status["status"] == "ok" else "unavailable",
+            "version": status["version"],
+            "message": status["status"],
+            "error": status["error"],
+        }
+
     checks = [
         timed("Backend API", lambda: {"status": "ok", "version": web.api_version}),
         timed("Scanner orchestrator", lambda: {"status": "ok", "version": "vuln-agent"}),
-        timed("Semgrep", lambda: {"status": "ok" if semgrep.executable_path() else "unavailable", "version": semgrep.version()}),
+        timed("Semgrep", semgrep_check),
         timed("Ollama", lambda: {"status": "ok" if ollama.healthcheck().ok else "unavailable", "message": ollama.healthcheck().message}),
         timed("Report generation", lambda: {"status": "ok" if scanner.report_dir.parent.exists() or scanner.report_dir.parent.mkdir(parents=True, exist_ok=True) is None else "unavailable"}),
         timed("Temporary workspace", lambda: {"status": "ok" if web.scan_temp_root.exists() or web.scan_temp_root.mkdir(parents=True, exist_ok=True) is None else "unavailable"}),
@@ -44,4 +53,3 @@ def health_payload(scanner: Settings, web: WebSettings, active_scans: int) -> di
         "temporary_workspace_policy": f"Temporary workspaces under {web.scan_temp_root.name}, TTL {web.scan_workspace_ttl_seconds}s",
         "checks": checks,
     }
-

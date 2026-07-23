@@ -1,0 +1,35 @@
+:root {
+  --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  --canvas-bg: #f4f1ea;
+  --canvas-wash: radial-gradient(circle at 12% 8%, rgba(154, 176, 160, 0.26), transparent 32%),
+    radial-gradient(circle at 82% 16%, rgba(140, 164, 190, 0.18), transparent 30%),
+    linear-gradient(135deg, #faf8f3 0%, #eceff0 48%, #f7f2e9 100%);
+  --surface-glass: rgba(255, 255, 255, 0.58);
+  --surface-solid: rgba(255, 255, 255, 0.92);
+  --surface-technical: rgba(22, 25, 29, 0.96);
+  --text-primary: #202326;
+  --text-secondary: #5f666d;
+  --text-muted: #858d94;
+  --border-soft: rgba(255, 255, 255, 0.68);
+  --border-solid: rgba(36, 42, 48, 0.1);
+  --accent: #7d927d;
+  --accent-blue: #6e86a7;
+  --success: #51795f;
+  --warning: #a67536;
+  --danger: #ad4d4d;
+  --radius-lg: 30px;
+  --radius-md: 22px;
+  --radius-sm: 16px;
+  --shadow-soft: 0 20px 60px rgba(34, 38, 44, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  --shadow-hover: 0 26px 72px rgba(34, 38, 44, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.76);
+  --blur: blur(24px) saturate(140%);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --motion-fast: 160ms;
+  --motion: 220ms;
+}
