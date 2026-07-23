@@ -10,6 +10,7 @@ artifacts/
 .mypy_cache/
 .ruff_cache/
 .coverage
+.scan_runtime/
 .vscode/
 data/BenchmarkPython/
 
