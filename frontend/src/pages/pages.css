@@ -133,11 +133,112 @@
 
 .technical-list dd {
   margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.technical-list--compact {
+  grid-template-columns: 1fr;
+  padding: var(--space-4);
+}
+
+.compare-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: var(--space-4);
+  align-items: end;
+  padding: var(--space-5);
+}
+
+.compare-controls label,
+.compare-mode-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.compare-controls input[type='text'],
+.compare-controls input:not([type]) {
+  min-height: 42px;
+  border: 1px solid var(--border-solid);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-3);
+}
+
+.compare-mode-list {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--border-solid);
+  border-radius: var(--radius-sm);
+  padding: var(--space-4);
+}
+
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.comparison-card {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.table-panel {
+  border-radius: var(--radius-md);
+  background: var(--surface-solid);
+  padding: var(--space-5);
+}
+
+.responsive-table {
+  overflow-x: auto;
+}
+
+.responsive-table table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+.responsive-table th,
+.responsive-table td {
+  border-bottom: 1px solid var(--border-solid);
+  padding: var(--space-3);
+  text-align: left;
+  vertical-align: top;
+}
+
+.responsive-table th {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.markdown-summary {
+  max-height: 420px;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  background: var(--surface-technical);
+  color: #f5f7f8;
+  padding: var(--space-5);
+  white-space: pre-wrap;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(45, 103, 135, 0.42);
+  outline-offset: 2px;
 }
 
 @media (max-width: 1180px) {
   .status-grid,
   .mode-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .comparison-grid,
+  .compare-mode-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -146,7 +247,10 @@
   .status-grid,
   .mode-grid,
   .two-column,
-  .technical-list {
+  .technical-list,
+  .comparison-grid,
+  .compare-controls,
+  .compare-mode-list {
     grid-template-columns: 1fr;
   }
 }

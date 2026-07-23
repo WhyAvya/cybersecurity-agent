@@ -16,6 +16,7 @@ export function SourceSummary({
   onRemove: () => void;
 }) {
   const metadata = source.metadata ?? {};
+  const sourceTypeFallback = 'Not reported for this source type';
   return (
     <GlassPanel className="source-summary">
       <div className="summary-head">
@@ -40,11 +41,11 @@ export function SourceSummary({
         </div>
         <div>
           <strong>Ignored paths</strong>
-          <span>{String(metadata.ignored_paths ?? metadata.ignored_directory_count ?? 'Unavailable')}</span>
+          <span>{String(metadata.ignored_paths ?? metadata.ignored_directory_count ?? sourceTypeFallback)}</span>
         </div>
         <div>
           <strong>Excluded files</strong>
-          <span>{String(metadata.excluded_files ?? metadata.unsupported_file_count ?? 'Unavailable')}</span>
+          <span>{String(metadata.excluded_files ?? metadata.unsupported_file_count ?? sourceTypeFallback)}</span>
         </div>
       </div>
       {source.source_type === 'github' ? (

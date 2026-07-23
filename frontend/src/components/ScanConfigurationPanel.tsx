@@ -43,7 +43,7 @@ export function ScanConfigurationPanel({
         <div><dt>Selected files</dt><dd>{selectedFileCount}</dd></div>
         <div><dt>Maximum files</dt><dd>{config?.limits.max_source_files ?? 'Unavailable'}</dd></div>
         <div><dt>Ignored paths</dt><dd>{config?.limits.ignored_paths.join(', ') ?? 'Unavailable'}</dd></div>
-        <div><dt>Raw evidence</dt><dd>Kept by backend-supported scan request defaults in later phase</dd></div>
+        <div><dt>Raw evidence</dt><dd>Saved when the scan request enables raw artifact collection.</dd></div>
       </dl>
       <button className="primary-action" type="button" disabled={!canContinue || starting} onClick={onContinue}>
         {starting ? 'Starting scan' : 'Continue to Scan'}

@@ -39,6 +39,10 @@ export interface FrozenEvaluationResponse {
   error?: string;
   path?: string;
   conclusion?: string;
+  summary_markdown?: string;
+  mode_comparison?: Array<Record<string, string>>;
+  hybrid_agreement?: Array<Record<string, string>>;
+  runtime_errors?: Array<Record<string, string>>;
 }
 
 export interface ApiErrorPayload {

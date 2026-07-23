@@ -42,7 +42,7 @@ export function AppShell() {
             {backend ? <StatusBadge status={backend.status} label="API" /> : null}
             {semgrep ? <StatusBadge status={semgrep.status} label="Semgrep" /> : null}
             {ollama ? <StatusBadge status={ollama.status} label="Ollama" /> : null}
-            <span className="topbar__model">{config.data?.active_model ?? 'Model unavailable'}</span>
+            <span className="topbar__model">Configured model: {config.data?.active_model ?? 'Unavailable'}</span>
           </div>
         </header>
         <main className="content-canvas">

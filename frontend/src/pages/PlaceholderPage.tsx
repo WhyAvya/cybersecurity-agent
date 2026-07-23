@@ -5,11 +5,11 @@ import './pages.css';
 export function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
     <div className="page-stack">
-      <PageHeader eyebrow="Phase 1 shell" title={title}>
+      <PageHeader eyebrow="Available route" title={title}>
         {description}
       </PageHeader>
-      <EmptyState title="Not implemented in React Phase 1">
-        This route is intentionally present as a page shell. Source forms, scan submission, findings, comparisons, and charts are scheduled for later phases.
+      <EmptyState title="No content available">
+        This route has no additional content to display.
       </EmptyState>
     </div>
   );

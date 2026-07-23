@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../api/client';
@@ -17,6 +17,8 @@ import { ZipUploadPanel } from '../components/ZipUploadPanel';
 import type { SourceRecord } from '../types/api';
 import './newScan.css';
 
+const LAST_SOURCE_KEY = 'vuln-agent:last-source-id';
+
 export function NewScan() {
   const config = useConfig();
   const navigate = useNavigate();
@@ -27,12 +29,34 @@ export function NewScan() {
   const [scanName, setScanName] = useState('Security scan');
   const [message, setMessage] = useState('');
   const [removeError, setRemoveError] = useState('');
+  const [staleSourceNotice, setStaleSourceNotice] = useState('');
+
+  useEffect(() => {
+    const sourceId = window.localStorage.getItem(LAST_SOURCE_KEY);
+    if (!sourceId) return;
+    let cancelled = false;
+    apiClient.getSource(sourceId)
+      .then((next) => {
+        if (!cancelled) acceptSource(next);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          window.localStorage.removeItem(LAST_SOURCE_KEY);
+          setStaleSourceNotice('The previously selected source is no longer available. The backend may have restarted or the temporary workspace may have expired.');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function acceptSource(next: SourceRecord) {
     setSource(next);
     setSelectedFiles(next.files.map((file) => file.path));
     setMessage('');
     setRemoveError('');
+    setStaleSourceNotice('');
+    window.localStorage.setItem(LAST_SOURCE_KEY, next.source_id);
   }
 
   async function removeSource() {
@@ -41,6 +65,7 @@ export function NewScan() {
       await apiClient.deleteSource(source.source_id);
       setSource(null);
       setSelectedFiles([]);
+      window.localStorage.removeItem(LAST_SOURCE_KEY);
     } catch (exc) {
       setRemoveError(exc instanceof Error ? exc.message : 'Source removal failed.');
     }
@@ -56,8 +81,17 @@ export function NewScan() {
   return (
     <div className="page-stack">
       <PageHeader eyebrow="New Scan" title="Prepare a Python source">
-        Ingest code or inspect a public repository, choose the scanner mode, and confirm the file set. Scan execution is added in Phase 3.
+        Ingest code or inspect a public repository, choose the scanner mode, and start a backend scan.
       </PageHeader>
+      {staleSourceNotice ? (
+        <div className="error-state" role="status">
+          <div>
+            <h3>Previous source expired</h3>
+            <p>{staleSourceNotice}</p>
+            <button type="button" onClick={() => setStaleSourceNotice('')}>Return to source input</button>
+          </div>
+        </div>
+      ) : null}
       <div className="new-scan-layout">
         <GlassPanel className="source-workbench">
           <SourceTabs value={tab} onChange={setTab} />

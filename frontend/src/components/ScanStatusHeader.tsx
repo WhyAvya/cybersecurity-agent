@@ -16,7 +16,7 @@ export function ScanStatusHeader({ scan }: { scan: ScanJob }) {
         <div><dt>Stage</dt><dd>{scan.progress.stage}</dd></div>
         <div><dt>Files</dt><dd>{scan.progress.files_completed} / {scan.progress.files_total}</dd></div>
         <div><dt>Elapsed</dt><dd>{scan.progress.elapsed_seconds.toFixed(1)}s</dd></div>
-        <div><dt>Current file</dt><dd>{scan.progress.current_file ?? 'Unavailable'}</dd></div>
+        <div><dt>Current file</dt><dd>{scan.progress.current_file ?? 'No active file'}</dd></div>
       </dl>
     </GlassPanel>
   );
