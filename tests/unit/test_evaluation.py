@@ -69,6 +69,46 @@ def test_metrics_handle_binary_counts():
     assert metrics.precision == 0.5
 
 
+def test_metrics_count_uncertain_and_review_status_without_changing_prediction_policy():
+    metrics = calculate_metrics(
+        [
+            EvaluationPrediction(
+                test_id="uncertain",
+                expected_vulnerable=True,
+                predicted_vulnerable=False,
+                confidence=0.4,
+                analyzer_verdict="UNCERTAIN",
+                status="NEEDS_REVIEW",
+            ),
+            EvaluationPrediction(
+                test_id="accepted",
+                expected_vulnerable=True,
+                predicted_vulnerable=True,
+                confidence=0.9,
+                analyzer_verdict="TP",
+                status="ACCEPTED",
+            ),
+            EvaluationPrediction(
+                test_id="failed",
+                expected_vulnerable=False,
+                predicted_vulnerable=False,
+                confidence=None,
+                status="ERROR",
+                error="timeout",
+            ),
+        ]
+    )
+
+    assert metrics.tp == 1
+    assert metrics.fn == 1
+    assert metrics.tn == 0
+    assert metrics.uncertain_count == 1
+    assert metrics.review_required_count == 1
+    assert metrics.attempted_count == 3
+    assert metrics.completed_count == 2
+    assert metrics.error_rate == 1 / 3
+
+
 def test_per_cwe_metrics_groups_predictions():
     rows = per_cwe_metrics(
         [
@@ -145,6 +185,30 @@ def test_run_evaluation_writes_artifacts_without_placeholders(tmp_path: Path):
     week5 = (output_dir / "week5_report.md").read_text(encoding="utf-8")
     assert "{" not in week5
     assert "}" not in week5
+
+
+def test_run_evaluation_accepts_explicit_selected_ids(tmp_path: Path):
+    truth_path = tmp_path / "ground_truth.json"
+    truth_path.write_text(
+        json.dumps(
+            {
+                "BenchmarkTest00001": {"vulnerable": True, "cwe": "CWE-078"},
+                "BenchmarkTest00002": {"vulnerable": False, "cwe": "CWE-078"},
+                "BenchmarkTest00003": {"vulnerable": True, "cwe": "CWE-022"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = Settings(evaluation_dir=tmp_path / "artifacts" / "evaluation", ground_truth_path=truth_path)
+
+    output_dir = run_evaluation(settings, "all", offline=True, project_root=tmp_path, selected_ids=["BenchmarkTest00003", "BenchmarkTest00002"])
+
+    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["selected_ids"] == ["BenchmarkTest00003", "BenchmarkTest00002"]
+    assert manifest["sampling_method"] == "provided"
+    for mode in ("semgrep", "llm", "semgrep_gated", "hybrid"):
+        rows = [json.loads(line) for line in (output_dir / "predictions" / f"{mode}.jsonl").read_text(encoding="utf-8").splitlines()]
+        assert [row["test_id"] for row in rows] == ["BenchmarkTest00003", "BenchmarkTest00002"]
 
 
 def _write_benchmark_case(root: Path, test_id: str = "BenchmarkTest00001") -> None:

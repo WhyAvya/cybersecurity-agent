@@ -103,14 +103,18 @@ def pilot_sample_ids(ground_truth: dict[str, dict[str, Any]], sample_size: int, 
 
 
 def calculate_metrics(predictions: list[EvaluationPrediction]) -> EvaluationMetrics:
-    tp = fp = tn = fn = errors = uncertain = completed = 0
+    tp = fp = tn = fn = errors = uncertain = review_required = completed = 0
     for item in predictions:
         if item.error:
             errors += 1
             continue
         completed += 1
-        if item.confidence is None:
+        verdict = (item.analyzer_verdict or "").upper()
+        status = (item.status or "").upper()
+        if item.confidence is None or verdict == "UNCERTAIN" or status == "NEEDS_REVIEW":
             uncertain += 1
+        if status == "NEEDS_REVIEW":
+            review_required += 1
         if item.expected_vulnerable and item.predicted_vulnerable:
             tp += 1
         elif not item.expected_vulnerable and item.predicted_vulnerable:
@@ -141,6 +145,10 @@ def calculate_metrics(predictions: list[EvaluationPrediction]) -> EvaluationMetr
         completion_rate=completed / total if total else 0.0,
         error_rate=errors / total if total else 0.0,
         uncertain_rate=uncertain / total if total else 0.0,
+        uncertain_count=uncertain,
+        review_required_count=review_required,
+        attempted_count=total,
+        completed_count=completed,
     )
 
 
@@ -435,6 +443,8 @@ def live_prediction(
             decision_source = "semgrep"
             source_code_supplied = False
             semgrep_gate_triggered = False
+            analyzer_verdict = "TP" if predicted else "FP"
+            status = "ACCEPTED" if predicted else "REJECTED"
         elif mode == "llm":
             code = file_path.read_text(encoding="utf-8", errors="replace")
             result = generate_analysis_capture(settings, build_llm_benchmark_prompt(test_id, code))
@@ -452,6 +462,8 @@ def live_prediction(
             decision_source = "llm_full_file"
             source_code_supplied = True
             semgrep_gate_triggered = False
+            analyzer_verdict = analysis.verdict.value
+            status = classify_status(analysis.verdict, analysis.confidence, settings.hybrid_accept_confidence).value
         elif mode == "semgrep_gated":
             findings, _tool_metadata, semgrep_raw_path = scan_semgrep_capture(settings, file_path, raw_dir, test_id)
             if not findings:
@@ -467,6 +479,8 @@ def live_prediction(
                 decision_source = "semgrep_gate"
                 source_code_supplied = False
                 semgrep_gate_triggered = True
+                analyzer_verdict = "FP"
+                status = "REJECTED"
             else:
                 analyses: list[AgentAnalysis] = []
                 raw_responses: list[str] = []
@@ -495,6 +509,15 @@ def live_prediction(
                 decision_source = "semgrep_gated_llm"
                 source_code_supplied = False
                 semgrep_gate_triggered = False
+                if accepted:
+                    analyzer_verdict = "TP"
+                    status = "ACCEPTED"
+                elif any(analysis.verdict == Verdict.uncertain for analysis in analyses):
+                    analyzer_verdict = "UNCERTAIN"
+                    status = "NEEDS_REVIEW"
+                else:
+                    analyzer_verdict = analyses[0].verdict.value if analyses else "FP"
+                    status = "REJECTED"
         elif mode == "hybrid":
             detector_errors: list[str] = []
             findings = []
@@ -546,6 +569,14 @@ def live_prediction(
                 detector_agreement = "agree_safe" if not detector_errors else "detector_error"
             source_code_supplied = True
             semgrep_gate_triggered = False
+            analyzer_verdict = analysis.verdict.value if analysis is not None else ("TP" if semgrep_predicted else "ERROR")
+            status = (
+                classify_status(analysis.verdict, analysis.confidence, settings.hybrid_accept_confidence).value
+                if analysis is not None
+                else ("ACCEPTED" if semgrep_predicted else "ERROR")
+            )
+            if detector_errors:
+                status = "NEEDS_REVIEW" if predicted else "ERROR"
             return HybridEvaluationPrediction(
                 test_id=test_id,
                 expected_vulnerable=expected,
@@ -565,6 +596,8 @@ def live_prediction(
                 semgrep_gate_triggered=semgrep_gate_triggered,
                 raw_response_path=raw_response_path,
                 semgrep_raw_path=semgrep_raw_path,
+                analyzer_verdict=analyzer_verdict,
+                status=status,
                 error="; ".join(detector_errors) if detector_errors and not predicted else None,
                 semgrep_predicted=semgrep_predicted,
                 llm_predicted=llm_predicted,
@@ -592,6 +625,8 @@ def live_prediction(
             semgrep_gate_triggered=semgrep_gate_triggered,
             raw_response_path=raw_response_path,
             semgrep_raw_path=semgrep_raw_path,
+            analyzer_verdict=analyzer_verdict,
+            status=status,
         )
     except (FileNotFoundError, SecurityPolicyError, ToolError, LLMError, SchemaParseError, ValueError) as exc:
         return EvaluationPrediction(
@@ -605,6 +640,7 @@ def live_prediction(
             schema_valid=not isinstance(exc, SchemaParseError),
             source_file=str(file_path) if "file_path" in locals() else None,
             decision_source=mode,
+            status="ERROR",
             error=str(exc),
         )
 

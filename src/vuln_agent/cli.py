@@ -46,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("mode", choices=["semgrep", "llm", "semgrep_gated", "hybrid", "all"])
     evaluate.add_argument("--sample-size", type=int)
     evaluate.add_argument("--seed", type=int)
+    evaluate.add_argument("--semgrep-config")
+    evaluate.add_argument("--case-ids", nargs="+")
     evaluate.add_argument("--offline", action="store_true")
     evaluate.add_argument("--resume", action="store_true")
 
@@ -151,6 +153,7 @@ def main(argv: list[str] | None = None) -> int:
                 seed=args.seed,
                 offline=args.offline,
                 project_root=PROJECT_ROOT,
+                selected_ids=args.case_ids,
             )
             print(f"Evaluation output: {output_dir}")
             return 0

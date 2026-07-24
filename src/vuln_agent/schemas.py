@@ -244,6 +244,8 @@ class EvaluationPrediction(BaseModel):
     semgrep_gate_triggered: bool = False
     raw_response_path: str | None = None
     semgrep_raw_path: str | None = None
+    analyzer_verdict: str | None = None
+    status: str | None = None
     error: str | None = None
 
 
@@ -262,6 +264,10 @@ class EvaluationMetrics(BaseModel):
     completion_rate: float = 0.0
     error_rate: float = 0.0
     uncertain_rate: float = 0.0
+    uncertain_count: int = 0
+    review_required_count: int = 0
+    attempted_count: int = 0
+    completed_count: int = 0
 
 
 class FailureRecord(BaseModel):
