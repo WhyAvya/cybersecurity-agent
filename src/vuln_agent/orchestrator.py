@@ -38,7 +38,7 @@ from .utils import infer_cwe_from_rule, normalize_cwe, parse_model_json, stable_
 
 
 SCAN_MODES = ("semgrep", "llm", "semgrep_gated", "hybrid")
-SINK_CALL_PATTERN = re.compile(r"\b(os\.system|subprocess\.(?:run|call|Popen|check_call|check_output)|eval|exec)\s*\(([^)]*)\)", re.IGNORECASE)
+SINK_CALL_PATTERN = re.compile(r"\b(os\.system|subprocess\.(?:run|call|Popen|check_call|check_output)|eval|exec|[A-Za-z_][A-Za-z0-9_]*\.execute)\s*\(([^)]*)\)", re.IGNORECASE)
 SINK_FAMILY_PATTERNS = (
     ("os.system", re.compile(r"(?:\bos\.system\b|input[-_. ]+to[-_. ]+os[-_. ]+system|os[-_. ]+system(?:[-_. ]+call)?)", re.IGNORECASE)),
     ("subprocess.run", re.compile(r"(?:\bsubprocess\.run\b|input[-_. ]+to[-_. ]+subprocess[-_. ]+run|subprocess[-_. ]+run)", re.IGNORECASE)),
@@ -48,6 +48,7 @@ SINK_FAMILY_PATTERNS = (
     ("subprocess.check_output", re.compile(r"(?:\bsubprocess\.check_output\b|input[-_. ]+to[-_. ]+subprocess[-_. ]+check[-_. ]+output|subprocess[-_. ]+check[-_. ]+output)", re.IGNORECASE)),
     ("eval", re.compile(r"(?:\beval\b|input[-_. ]+to[-_. ]+eval)", re.IGNORECASE)),
     ("exec", re.compile(r"(?:\bexec\b|input[-_. ]+to[-_. ]+exec)", re.IGNORECASE)),
+    ("sql.execute", re.compile(r"(?:\.\s*execute\s*\(|sql[-_. ]+injection|flask[-_. ]+to[-_. ]+execute)", re.IGNORECASE)),
 )
 
 
@@ -91,9 +92,19 @@ def validate_file_finding_location(item: FileFinding, code: str) -> ValidatedLoc
     if start > end:
         start, end = end, start
 
-    evidence = _evidence_candidates(item)
-    matches: list[tuple[int, int, str]] = []
-    for snippet in evidence:
+    sink_line = _plan_b_sink_line(item, lines)
+    if sink_line is not None:
+        return ValidatedLocation(sink_line, sink_line, False, None, original_start, original_end)
+
+    evidence = [
+        item.sink_evidence,
+        item.data_flow_evidence,
+        item.source_evidence,
+        item.sanitization_evidence,
+        item.reasoning_summary,
+    ]
+    matches: list[tuple[int, int, str, int]] = []
+    for priority, snippet in enumerate(_clean_evidence(evidence)):
         snippet_lines = [line.strip() for line in snippet.splitlines() if line.strip()]
         if not snippet_lines:
             continue
@@ -101,24 +112,142 @@ def validate_file_finding_location(item: FileFinding, code: str) -> ValidatedLoc
             needle = snippet_lines[0]
             for index, source_line in enumerate(lines, 1):
                 if needle in source_line.strip():
-                    matches.append((index, index, snippet))
+                    matches.append((index, index, snippet, priority))
         else:
             normalized_snippet = "\n".join(snippet_lines)
             for index in range(0, max(0, len(lines) - len(snippet_lines) + 1)):
                 window = "\n".join(line.strip() for line in lines[index : index + len(snippet_lines)])
                 if normalized_snippet in window:
-                    matches.append((index + 1, index + len(snippet_lines), snippet))
+                    matches.append((index + 1, index + len(snippet_lines), snippet, priority))
 
     if matches:
         reference = original_start if isinstance(original_start, int) else None
         if reference is not None:
-            match_start, match_end, _snippet = min(matches, key=lambda match: abs(match[0] - reference))
+            match_start, match_end, _snippet, _priority = min(matches, key=lambda match: (match[3], abs(match[0] - reference)))
         else:
-            match_start, match_end, _snippet = matches[0]
+            match_start, match_end, _snippet, _priority = min(matches, key=lambda match: match[3])
         return ValidatedLocation(match_start, match_end, False, None, original_start, original_end)
 
     note = "Location could not be verified from returned evidence."
     return ValidatedLocation(start, end, True, note, original_start, original_end)
+
+
+def _clean_evidence(candidates: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    for candidate in candidates:
+        text = " ".join((candidate or "").strip().split())
+        if len(text) >= 4 and text not in cleaned:
+            cleaned.append(text)
+    return cleaned
+
+
+def _plan_b_sink_line(item: FileFinding, lines: list[str]) -> int | None:
+    if item.verdict != Verdict.tp or not item.sink_evidence:
+        return None
+    cwe = normalize_cwe(item.normalized_cwe)
+    if cwe == "CWE-078":
+        return _first_line_matching(lines, (r"\bos\.system\s*\(", r"\bsubprocess\.(?:run|call|Popen)\s*\("))
+    if cwe == "CWE-089":
+        return _first_line_matching(lines, (r"\.\s*execute\s*\(",))
+    return None
+
+
+def validate_plan_b_file_finding(item: FileFinding, code: str) -> FileFinding:
+    cwe = normalize_cwe(item.normalized_cwe)
+    if item.verdict != Verdict.tp or cwe not in {"CWE-078", "CWE-089"}:
+        return item
+    if not (item.source_evidence and item.sink_evidence and item.data_flow_evidence):
+        return item
+
+    evidence = " ".join(
+        [
+            item.source_evidence,
+            item.sink_evidence,
+            item.data_flow_evidence,
+            item.sanitization_evidence,
+            item.reasoning_summary,
+        ]
+    )
+    combined = f"{evidence}\n{code}".lower()
+    reasons: list[str] = []
+    if cwe == "CWE-078":
+        if not _has_command_execution_sink(combined):
+            reasons.append("no command execution sink supports CWE-078")
+        if _has_shell_false_allowlist(combined):
+            reasons.append("fixed or allowlisted subprocess arguments use shell=False")
+        if _claimed_flow_has_constant_overwrite(item, code):
+            reasons.append("claimed tainted value is overwritten by a constant before the command sink")
+    if cwe == "CWE-089":
+        if not _has_sql_execution_sink(combined):
+            reasons.append("no SQL execution sink supports CWE-089")
+        if _has_parameterized_execute(combined):
+            reasons.append("SQL execution uses separate parameters/placeholders")
+        if _claimed_flow_has_constant_overwrite(item, code):
+            reasons.append("claimed tainted value is overwritten by a constant before the SQL sink")
+
+    if not reasons:
+        return item
+    summary = item.reasoning_summary.strip()
+    suffix = "Deterministic validation rejected this Plan B finding: " + "; ".join(reasons) + "."
+    return item.model_copy(
+        update={
+            "verdict": Verdict.fp,
+            "confidence": min(item.confidence, 0.2),
+            "normalized_cwe": "NONE",
+            "reasoning_summary": f"{summary} {suffix}".strip(),
+            "needs_more_context": False,
+        }
+    )
+
+
+def _has_command_execution_sink(text: str) -> bool:
+    return bool(re.search(r"\bos\.system\s*\(", text) or re.search(r"\bsubprocess\.(?:run|call|popen|check_call|check_output)\s*\(", text))
+
+
+def _has_shell_false_allowlist(text: str) -> bool:
+    return "shell=false" in text and bool(re.search(r"(allowed|allowlist|whitelist|fixed|predefined|commands\s*=|\[[^\]]+['\"])", text))
+
+
+def _has_sql_execution_sink(text: str) -> bool:
+    return bool(re.search(r"\.\s*execute\s*\(", text))
+
+
+def _has_parameterized_execute(text: str) -> bool:
+    return bool(re.search(r"\.\s*execute\s*\(\s*[^,\n]+,\s*[^)]", text))
+
+
+def _claimed_flow_has_constant_overwrite(item: FileFinding, code: str) -> bool:
+    evidence = " ".join([item.data_flow_evidence, item.sink_evidence, item.reasoning_summary])
+    variables = [name for name in re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\b\s*(?:->|reaches|flows|to)", evidence) if name not in {"user_input", "param"}]
+    if not variables:
+        variables = re.findall(r"\b(bar|cmd|argstr|sql|query)\b", evidence, flags=re.IGNORECASE)
+    lines = code.splitlines()
+    sink_line = _first_line_matching(lines, (r"\bos\.system\s*\(", r"\bsubprocess\.(?:run|call|Popen)\s*\(", r"\.\s*execute\s*\("))
+    for variable in dict.fromkeys(variables):
+        tainted_lines = [
+            index
+            for index, line in enumerate(lines, 1)
+            if re.search(rf"\b{re.escape(variable)}\s*=\s*.*(?:param|request\.|get_form_parameter|getlist|values\[[0-9]+\]|keyB|[\"']user[\"'])", line, re.IGNORECASE)
+        ]
+        constant_lines = [
+            index
+            for index, line in enumerate(lines, 1)
+            if re.search(rf"\b{re.escape(variable)}\s*=\s*(['\"][^'\"]*['\"]|\w+\[[\"'][^\"']*(?:keyA|safe)[^\"']*[\"']\])", line, re.IGNORECASE)
+        ]
+        if any(
+            tainted_line < constant_line and (sink_line is None or constant_line < sink_line)
+            for tainted_line in tainted_lines
+            for constant_line in constant_lines
+        ):
+            return True
+    return False
+
+
+def _first_line_matching(lines: list[str], patterns: tuple[str, ...]) -> int | None:
+    for index, line in enumerate(lines, 1):
+        if any(re.search(pattern, line) for pattern in patterns):
+            return index
+    return None
 
 
 def current_git_metadata(root: Path) -> dict[str, object]:
@@ -381,6 +510,7 @@ class VulnerabilityOrchestrator:
             analysis = FileAnalysis.model_validate(result.parsed.model_dump())
             records = []
             for item in analysis.findings:
+                item = validate_plan_b_file_finding(item, code)
                 location = validate_file_finding_location(item, code)
                 finding = self._finding_from_file_item(relative, item, location)
                 model_metadata = result.metadata.model_copy(update={"prompt_name": prompt.name, "prompt_version": prompt.version, "prompt_checksum": prompt.checksum})

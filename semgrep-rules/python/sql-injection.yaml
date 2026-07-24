@@ -1,0 +1,37 @@
+rules:
+  - id: vuln-agent.python.sql-injection.flask-to-execute-string
+    languages:
+      - python
+    severity: ERROR
+    message: Flask request input flows into a string-built SQL statement executed by the database driver.
+    patterns:
+      - pattern: $CUR.execute($SQL)
+      - pattern-either:
+          - pattern-inside: |
+              $PARAM = request.form.get(...)
+              ...
+              $SQL = f"..."
+              ...
+          - pattern-inside: |
+              $PARAM = request.args.get(...)
+              ...
+              $SQL = f"..."
+              ...
+          - pattern-inside: |
+              $PARAM = request.headers.get(...)
+              ...
+              $SQL = f"..."
+              ...
+          - pattern-inside: |
+              $REQ = $WRAPPER.get_form_parameter(...)
+              ...
+              $SQL = f"..."
+              ...
+    metadata:
+      cwe:
+        - "CWE-089"
+      category: security
+      confidence: HIGH
+      references:
+        - https://cwe.mitre.org/data/definitions/89.html
+      rationale: Detects benchmark-style SQL injection where request data is interpolated into SQL before execute(). Parameterized execute(sql, params) calls are treated as mitigated.

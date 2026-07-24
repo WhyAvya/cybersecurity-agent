@@ -17,3 +17,49 @@ rules:
       references:
         - https://cwe.mitre.org/data/definitions/78.html
       rationale: Detects direct data flow from Python input() to os.system(). This intentionally does not flag fixed allowlisted subprocess.run(..., shell=False) argument arrays.
+  - id: vuln-agent.python.command-injection.flask-to-subprocess-run-shell-array
+    languages:
+      - python
+    severity: ERROR
+    message: Flask request input is appended to a subprocess shell command array.
+    patterns:
+      - pattern: subprocess.run($CMD, ...)
+      - pattern-either:
+          - pattern-inside: |
+              $VALUES = request.form.getlist(...)
+              ...
+              $PARAM = $VALUES[0]
+              ...
+              $BAR = $PARAM
+              ...
+              $CMD = []
+              ...
+              $CMD.append("sh")
+              ...
+              $CMD.append("-c")
+              ...
+              $CMD.append(f"...{$BAR}...")
+              ...
+          - pattern-inside: |
+              $VALUES = request.form.getlist(...)
+              ...
+              $PARAM = $VALUES[0]
+              ...
+              $BAR = $PARAM
+              ...
+              $CMD = []
+              ...
+              $CMD.append("cmd.exe")
+              ...
+              $CMD.append("-c")
+              ...
+              $CMD.append(f"...{$BAR}...")
+              ...
+    metadata:
+      cwe:
+        - "CWE-078"
+      category: security
+      confidence: HIGH
+      references:
+        - https://cwe.mitre.org/data/definitions/78.html
+      rationale: Detects benchmark-style Flask request data appended to sh/cmd -c subprocess arrays. Fixed allowlisted arrays using shell=False and local constant overwrites are intentionally outside this rule.

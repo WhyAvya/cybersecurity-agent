@@ -124,6 +124,19 @@ class AgentAnalysis(BaseModel):
     sanitization_evidence: str = ""
     needs_more_context: bool = False
 
+    @field_validator(
+        "reasoning_summary",
+        "remediation",
+        "source_evidence",
+        "sink_evidence",
+        "data_flow_evidence",
+        "sanitization_evidence",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_evidence_string(cls, value: Any) -> Any:
+        return coerce_evidence_string(value)
+
 
 class FileFinding(BaseModel):
     line_start: int
@@ -150,7 +163,34 @@ class FileFinding(BaseModel):
     )
     @classmethod
     def _empty_string_for_null_evidence(cls, value: Any) -> Any:
-        return "" if value is None else value
+        return coerce_evidence_string(value)
+
+    @field_validator("verdict", mode="before")
+    @classmethod
+    def _coerce_verdict_aliases(cls, value: Any) -> Any:
+        return coerce_verdict_alias(value)
+
+
+def coerce_verdict_alias(value: Any) -> Any:
+    if isinstance(value, str):
+        normalized = value.strip().upper()
+        aliases = {
+            "VULNERABLE": Verdict.tp.value,
+            "UNSAFE": Verdict.tp.value,
+            "SAFE": Verdict.fp.value,
+            "NOT_VULNERABLE": Verdict.fp.value,
+            "NON_VULNERABLE": Verdict.fp.value,
+        }
+        return aliases.get(normalized, value)
+    return value
+
+
+def coerce_evidence_string(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return "; ".join(str(item) for item in value)
+    return value
 
 
 class FileAnalysis(BaseModel):

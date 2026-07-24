@@ -31,4 +31,14 @@ def test_file_analysis_prompt_requires_allowlist_and_source_to_sink_reasoning():
     assert "shell=False" in prompt.text
     assert "fixed argument arrays" in prompt.text
     assert "Trace source to sink" in prompt.text
+
+
+def test_file_analysis_prompt_requires_plan_b_cwe_sink_and_mitigation_checks():
+    prompt = build_file_analysis_prompt("app.py", "cur.execute(sql, (bar,))")
+
+    assert "CWE/sink consistency" in prompt.text
+    assert "actual command execution sink" in prompt.text
+    assert "constant overwrites" in prompt.text
+    assert "SQL execution sink" in prompt.text
+    assert "execute(sql, params)" in prompt.text
     assert "subprocess.run" in prompt.text

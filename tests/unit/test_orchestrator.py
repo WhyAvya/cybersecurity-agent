@@ -7,7 +7,7 @@ import pytest
 
 from vuln_agent.exceptions import ToolError
 from vuln_agent.llm import LLMResult, RawModel
-from vuln_agent.orchestrator import VulnerabilityOrchestrator
+from vuln_agent.orchestrator import VulnerabilityOrchestrator, validate_plan_b_file_finding
 from vuln_agent.schemas import AgentAnalysis, FileAnalysis, FileFinding, FindingStatus, ModelMetadata, SemgrepFinding, Severity, ToolMetadata, Verdict
 
 
@@ -549,6 +549,143 @@ def test_llm_vulnerable_os_system_regression_remains_strong_cwe_078(tmp_path: Pa
     assert records[0].confidence == 1.0
     assert records[0].line_start == 3
     assert records[0].location_is_approximate is False
+
+
+def test_llm_plan_b_sqli_location_prefers_execute_sink(tmp_path: Path):
+    source = tmp_path / "app.py"
+    source.write_text(
+        "param = request.form.get('case')\nbar = param\nsql = f\"SELECT * FROM users WHERE password = '{bar}'\"\ncur.execute(sql)\n",
+        encoding="utf-8",
+    )
+    settings = Settings(allowed_scan_root=tmp_path, report_dir=tmp_path / "reports")
+    llm_finding = FileFinding(
+        line_start=1,
+        line_end=1,
+        verdict=Verdict.tp,
+        confidence=1.0,
+        normalized_cwe="CWE-089",
+        source_evidence="param = request.form.get('case')",
+        sink_evidence="sql = f\"SELECT * FROM users WHERE password = '{bar}'\"",
+        data_flow_evidence="param -> bar -> sql -> cur.execute",
+        reasoning_summary="SQL injection reaches execute",
+    )
+
+    records, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(source, mode="llm")
+
+    assert records[0].line_start == 4
+    assert records[0].normalized_cwe == "CWE-089"
+    assert records[0].location_is_approximate is False
+
+
+def test_plan_b_validation_rejects_command_finding_without_command_sink():
+    item = FileFinding(
+        line_start=4,
+        line_end=4,
+        verdict=Verdict.tp,
+        confidence=1.0,
+        normalized_cwe="CWE-078",
+        source_evidence="param = request.args.get('case')",
+        sink_evidence="f.write(param)",
+        data_flow_evidence="param -> f.write",
+        reasoning_summary="file write is command injection",
+    )
+
+    checked = validate_plan_b_file_finding(item, "f.write(param)")
+
+    assert checked.verdict == Verdict.fp
+    assert checked.normalized_cwe == "NONE"
+    assert "no command execution sink" in checked.reasoning_summary
+
+
+def test_plan_b_validation_rejects_parameterized_sqli_claim():
+    code = "sql = 'SELECT username FROM users WHERE password = ?'\ncur.execute(sql, (bar,))"
+    item = FileFinding(
+        line_start=2,
+        line_end=2,
+        verdict=Verdict.tp,
+        confidence=1.0,
+        normalized_cwe="CWE-089",
+        source_evidence="bar = request.args.get('case')",
+        sink_evidence="cur.execute(sql, (bar,))",
+        data_flow_evidence="bar -> sql query parameter",
+        reasoning_summary="SQL injection",
+    )
+
+    checked = validate_plan_b_file_finding(item, code)
+
+    assert checked.verdict == Verdict.fp
+    assert checked.normalized_cwe == "NONE"
+    assert "separate parameters" in checked.reasoning_summary
+
+
+def test_plan_b_validation_rejects_simple_constant_overwrite_before_sink():
+    code = (
+        'param = request.form.get("case")\n'
+        'choices = {"user": param, "safe": "status"}\n'
+        'bar = choices["user"]\n'
+        'bar = choices["safe"]\n'
+        'subprocess.run(f"echo {bar}", shell=True)\n'
+    )
+    item = FileFinding(
+        line_start=5,
+        line_end=5,
+        verdict=Verdict.tp,
+        confidence=1.0,
+        normalized_cwe="CWE-078",
+        source_evidence="param = request.form.get('case')",
+        sink_evidence="subprocess.run(f'echo {bar}', shell=True)",
+        data_flow_evidence="param -> choices['user'] -> bar -> subprocess.run",
+        reasoning_summary="command injection",
+    )
+
+    checked = validate_plan_b_file_finding(item, code)
+
+    assert checked.verdict == Verdict.fp
+    assert "constant before the command sink" in checked.reasoning_summary
+
+
+def test_plan_b_validation_allows_later_tainted_assignment_after_constant():
+    code = (
+        'param = request.form.get("case")\n'
+        'bar = "safe"\n'
+        'bar = param\n'
+        'subprocess.run(f"echo {bar}", shell=True)\n'
+    )
+    item = FileFinding(
+        line_start=4,
+        line_end=4,
+        verdict=Verdict.tp,
+        confidence=1.0,
+        normalized_cwe="CWE-078",
+        source_evidence="param = request.form.get('case')",
+        sink_evidence="subprocess.run(f'echo {bar}', shell=True)",
+        data_flow_evidence="param -> bar -> subprocess.run",
+        reasoning_summary="command injection",
+    )
+
+    checked = validate_plan_b_file_finding(item, code)
+
+    assert checked.verdict == Verdict.tp
+    assert checked.normalized_cwe == "CWE-078"
+
+
+def test_file_finding_accepts_common_model_verdict_alias_and_list_evidence():
+    item = FileFinding.model_validate(
+        {
+            "line_start": 1,
+            "line_end": 1,
+            "verdict": "VULNERABLE",
+            "confidence": 0.9,
+            "normalized_cwe": "CWE-089",
+            "reasoning_summary": "SQL injection",
+            "data_flow_evidence": [{"line_start": 1, "line_end": 2}],
+            "sanitization_evidence": [],
+        }
+    )
+
+    assert item.verdict == Verdict.tp
+    assert "line_start" in item.data_flow_evidence
+    assert item.sanitization_evidence == ""
 
 
 def test_grouping_deduplicates_adjacent_rules(tmp_path: Path):

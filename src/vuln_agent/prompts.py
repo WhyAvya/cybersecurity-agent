@@ -72,18 +72,17 @@ Independently inspect the full file. Return JSON only. Do not reveal private
 chain-of-thought. Do not invent identifiers, functions, evidence, rule IDs, or
 line numbers.
 
-Trace source to sink before classifying: identify the exact untrusted value,
-whether it reaches the dangerous sink directly, and whether guard conditions,
-validation, sanitization, safe wrappers, or fixed allowlists dominate the sink.
-For command execution, distinguish command construction from command selection.
-Consider shell=True versus shell=False, fixed argument arrays, and predefined
-safe values. Do not classify code as command injection merely because
-subprocess.run is used. If user input only selects from a fixed allowlist of
-predefined argument arrays and shell=False is used, treat that as a strong
-mitigating control unless you can identify a concrete bypass. Return UNCERTAIN
-when evidence is ambiguous, and SAFE by omitting a finding when fixed allowlists
-and shell=False prevent attacker control. Provide concise evidence text and the
-most relevant sink line for each reported finding.
+Trace source to sink before classifying. Before reporting VULNERABLE, provide
+an exact untrusted source, exact dangerous sink, explicit source-to-sink path,
+mitigation check, CWE/sink consistency, and
+why any mitigation is insufficient. For CWE-078, require an actual command execution sink; distinguish shell=True, shell=False, fixed argument arrays,
+allowlists, constant overwrites, and subprocess.run usage. Do not classify
+command injection merely because subprocess is present. For CWE-089, require a SQL execution sink and
+string-built SQL; treat execute(sql, params), placeholders with separately
+supplied values, and constant overwrites as strong mitigations. Return
+UNCERTAIN when the flow or mitigation cannot be established, and SAFE by
+omitting a finding when a clear effective mitigation exists. Provide concise
+evidence text and the most relevant sink line for each reported finding.
 
 Return exactly one JSON object with a findings array. The array may be empty
 only when no supported vulnerability finding exists. Each finding must include:
