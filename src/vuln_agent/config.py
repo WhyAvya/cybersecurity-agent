@@ -51,6 +51,7 @@ class Settings(BaseModel):
     allowed_scan_root: Path = Path(".")
     allow_scan_root_escape: bool = False
     hybrid_accept_confidence: float = Field(default=0.60, ge=0.0, le=1.0)
+    hybrid_dedupe_line_threshold: int = Field(default=3, ge=0, le=20)
     high_priority_confidence: float = Field(default=0.85, ge=0.0, le=1.0)
     max_agent_iterations: int = Field(default=3, ge=1, le=10)
     evaluation_seed: int = 42

@@ -38,6 +38,17 @@ from .utils import infer_cwe_from_rule, normalize_cwe, parse_model_json, stable_
 
 
 SCAN_MODES = ("semgrep", "llm", "semgrep_gated", "hybrid")
+SINK_CALL_PATTERN = re.compile(r"\b(os\.system|subprocess\.(?:run|call|Popen|check_call|check_output)|eval|exec)\s*\(([^)]*)\)", re.IGNORECASE)
+SINK_FAMILY_PATTERNS = (
+    ("os.system", re.compile(r"(?:\bos\.system\b|input[-_. ]+to[-_. ]+os[-_. ]+system|os[-_. ]+system(?:[-_. ]+call)?)", re.IGNORECASE)),
+    ("subprocess.run", re.compile(r"(?:\bsubprocess\.run\b|input[-_. ]+to[-_. ]+subprocess[-_. ]+run|subprocess[-_. ]+run)", re.IGNORECASE)),
+    ("subprocess.call", re.compile(r"(?:\bsubprocess\.call\b|input[-_. ]+to[-_. ]+subprocess[-_. ]+call|subprocess[-_. ]+call)", re.IGNORECASE)),
+    ("subprocess.popen", re.compile(r"(?:\bsubprocess\.Popen\b|input[-_. ]+to[-_. ]+subprocess[-_. ]+popen|subprocess[-_. ]+popen)", re.IGNORECASE)),
+    ("subprocess.check_call", re.compile(r"(?:\bsubprocess\.check_call\b|input[-_. ]+to[-_. ]+subprocess[-_. ]+check[-_. ]+call|subprocess[-_. ]+check[-_. ]+call)", re.IGNORECASE)),
+    ("subprocess.check_output", re.compile(r"(?:\bsubprocess\.check_output\b|input[-_. ]+to[-_. ]+subprocess[-_. ]+check[-_. ]+output|subprocess[-_. ]+check[-_. ]+output)", re.IGNORECASE)),
+    ("eval", re.compile(r"(?:\beval\b|input[-_. ]+to[-_. ]+eval)", re.IGNORECASE)),
+    ("exec", re.compile(r"(?:\bexec\b|input[-_. ]+to[-_. ]+exec)", re.IGNORECASE)),
+)
 
 
 @dataclass(frozen=True)
@@ -494,19 +505,19 @@ class VulnerabilityOrchestrator:
         )
 
     def _group_findings(self, run_id: str, records: list[FinalFinding], metadata: ToolMetadata) -> list[FinalFinding]:
-        groups: dict[tuple[str, str, int, str, str], list[FinalFinding]] = {}
-        for record in records:
-            if record.status in {FindingStatus.rejected, FindingStatus.error}:
-                key_status = record.status.value
+        groups: list[list[FinalFinding]] = []
+        for record in sorted(records, key=self._dedupe_order_key):
+            for group in groups:
+                if self._same_finding(record, group):
+                    group.append(record)
+                    break
             else:
-                key_status = "active"
-            sink = self._sink_signature(record)
-            bucket = (record.relative_file, record.normalized_cwe, self._line_bucket(record), key_status, sink)
-            groups.setdefault(bucket, []).append(record)
+                groups.append([record])
+
         grouped = []
-        for key, items in sorted(groups.items()):
-            primary = sorted(items, key=lambda item: (item.status.value, -item.confidence, item.line_start))[0].model_copy(deep=True)
-            canonical = "|".join(map(str, key))
+        for items in sorted(groups, key=lambda group: self._dedupe_order_key(self._primary_finding(group))):
+            primary = self._primary_finding(items).model_copy(deep=True)
+            canonical = self._group_canonical_key(items)
             primary.group_id = "group-" + uuid.uuid5(uuid.NAMESPACE_URL, canonical).hex[:16]
             primary.underlying_finding_ids = sorted(item.finding_id for item in items)
             primary.underlying_rule_ids = sorted({item.rule_id for item in items})
@@ -535,6 +546,7 @@ class VulnerabilityOrchestrator:
                 primary.original_start_line = None
                 primary.original_end_line = None
                 primary.location_note = primary.location_note or "Grouped findings came from differing original model locations."
+            primary.detector_locations = [self._detector_location(item) for item in sorted(items, key=self._dedupe_order_key)]
             grouped.append(primary)
         return grouped
 
@@ -545,6 +557,134 @@ class VulnerabilityOrchestrator:
         evidence = (record.sink_evidence or record.source_evidence or record.reasoning_summary or record.rule_id).lower()
         return " ".join(evidence.replace('"', "'").split())[:120]
 
+    def _same_finding(self, record: FinalFinding, group: list[FinalFinding]) -> bool:
+        return all(self._records_match(record, existing) for existing in group)
+
+    def _records_match(self, left: FinalFinding, right: FinalFinding) -> bool:
+        if left.status == FindingStatus.error or right.status == FindingStatus.error:
+            return False
+        if left.relative_file != right.relative_file or left.normalized_cwe != right.normalized_cwe:
+            return False
+        if not self._locations_nearby(left, right):
+            return False
+        return self._compatible_evidence(left, right)
+
+    def _locations_nearby(self, left: FinalFinding, right: FinalFinding) -> bool:
+        return abs(left.line_start - right.line_start) <= self.settings.hybrid_dedupe_line_threshold
+
+    def _compatible_evidence(self, left: FinalFinding, right: FinalFinding) -> bool:
+        left_calls = self._sink_calls(left)
+        right_calls = self._sink_calls(right)
+        left_families = self._sink_families(left)
+        right_families = self._sink_families(right)
+        if left_families and right_families:
+            shared = left_families & right_families
+            if not shared:
+                return False
+            if left_calls and right_calls:
+                left_concrete = {call for call in left_calls if call[0] in shared}
+                right_concrete = {call for call in right_calls if call[0] in shared}
+                if left_concrete and right_concrete and left_concrete.isdisjoint(right_concrete):
+                    return False
+            return True
+        left_signature = self._sink_signature(left)
+        right_signature = self._sink_signature(right)
+        if left_signature and right_signature and (left_signature in right_signature or right_signature in left_signature):
+            return True
+        left_tokens = self._evidence_tokens(left)
+        right_tokens = self._evidence_tokens(right)
+        return bool(left_tokens and right_tokens and len(left_tokens & right_tokens) >= 2)
+
+    def _sink_operations(self, record: FinalFinding) -> set[str]:
+        return self._sink_families(record)
+
+    def _sink_families(self, record: FinalFinding) -> set[str]:
+        text = self._sink_context(record)
+        return {family for family, pattern in SINK_FAMILY_PATTERNS if pattern.search(text)}
+
+    def _sink_calls(self, record: FinalFinding) -> set[tuple[str, str]]:
+        text = self._sink_context(record)
+        calls = set()
+        for match in SINK_CALL_PATTERN.finditer(text):
+            family = match.group(1).lower()
+            argument = " ".join(match.group(2).replace('"', "'").split())
+            calls.add((family, argument))
+        return calls
+
+    def _sink_context(self, record: FinalFinding) -> str:
+        text = " ".join(
+            [
+                record.sink_evidence,
+                record.data_flow_evidence,
+                record.source_evidence,
+                record.reasoning_summary,
+                record.rule_id,
+                " ".join(record.raw_semgrep_cwes),
+                record.tool_metadata.name,
+                record.tool_metadata.config or "",
+                record.tool_metadata.stderr_excerpt,
+            ]
+        )
+        return text
+
+    def _evidence_tokens(self, record: FinalFinding) -> set[str]:
+        text = " ".join([record.sink_evidence, record.data_flow_evidence, record.source_evidence, record.reasoning_summary]).lower()
+        return {token for token in re.findall(r"[a-z_][a-z0-9_\.]{2,}", text) if token not in {"the", "and", "for", "with", "from", "this", "that"}}
+
+    def _dedupe_order_key(self, record: FinalFinding) -> tuple[str, str, int, int, str]:
+        return (record.relative_file, record.normalized_cwe, record.line_start, record.line_end, record.finding_id)
+
+    def _primary_finding(self, items: list[FinalFinding]) -> FinalFinding:
+        return sorted(items, key=self._primary_sort_key)[0]
+
+    def _primary_sort_key(self, item: FinalFinding) -> tuple[int, int, int, str, float, int, str]:
+        return (
+            1 if item.location_is_approximate else 0,
+            0 if self._sink_operations(item) else 1,
+            0 if "semgrep" in item.detectors else 1,
+            item.status.value,
+            -item.confidence,
+            item.line_start,
+            item.finding_id,
+        )
+
+    def _group_canonical_key(self, items: list[FinalFinding]) -> str:
+        parts = [
+            items[0].relative_file,
+            items[0].normalized_cwe,
+            str(min(item.line_start for item in items)),
+            self._canonical_sink_context(items),
+        ]
+        return "|".join(parts)
+
+    def _canonical_sink_context(self, items: list[FinalFinding]) -> str:
+        operations = sorted({operation for item in items for operation in self._sink_operations(item)})
+        if operations:
+            return ",".join(operations)
+        signatures = sorted(self._sink_signature(item) for item in items if self._sink_signature(item))
+        return signatures[0] if signatures else ",".join(sorted(item.rule_id for item in items))
+
+    def _detector_location(self, item: FinalFinding) -> dict[str, object]:
+        return {
+            "finding_id": item.finding_id,
+            "detector": item.detector,
+            "detectors": item.detectors,
+            "line_start": item.line_start,
+            "line_end": item.line_end,
+            "location_is_approximate": item.location_is_approximate,
+            "location_note": item.location_note,
+            "original_start_line": item.original_start_line,
+            "original_end_line": item.original_end_line,
+            "rule_id": item.rule_id,
+            "status": item.status.value,
+            "verdict": item.analyzer_verdict.value,
+            "confidence": item.confidence,
+            "source_evidence": item.source_evidence,
+            "sink_evidence": item.sink_evidence,
+            "data_flow_evidence": item.data_flow_evidence,
+            "reasoning_summary": item.reasoning_summary,
+        }
+
     def _agreement_status(self, items: list[FinalFinding]) -> str:
         detectors = {detector for item in items for detector in item.detectors}
         if any(item.status == FindingStatus.error for item in items):
@@ -552,7 +692,7 @@ class VulnerabilityOrchestrator:
         if detectors == {"semgrep", "llm"}:
             statuses = {item.status for item in items}
             verdicts = {item.analyzer_verdict for item in items}
-            if FindingStatus.rejected in statuses or Verdict.uncertain in verdicts:
+            if FindingStatus.rejected in statuses or Verdict.uncertain in verdicts or len(statuses) > 1:
                 return "detector_disagreement"
             return "detectors_agree"
         if detectors == {"semgrep"}:

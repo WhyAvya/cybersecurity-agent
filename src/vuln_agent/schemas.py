@@ -202,6 +202,7 @@ class FinalFinding(BaseModel):
     underlying_finding_ids: list[str] = Field(default_factory=list)
     underlying_rule_ids: list[str] = Field(default_factory=list)
     duplicate_count: int = 0
+    detector_locations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ScanSummary(BaseModel):

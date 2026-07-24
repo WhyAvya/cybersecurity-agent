@@ -91,6 +91,169 @@ def semgrep_finding(rule_id="python.lang.security.audit.dangerous-system-call", 
     )
 
 
+def test_hybrid_merges_semgrep_sink_and_llm_source_line_same_flow(tmp_path: Path):
+    source = tmp_path / "app.py"
+    source.write_text("import os\n\ndef run():\n    cmd = input('Command: ')\n    os.system(cmd)\n", encoding="utf-8")
+    settings = Settings(allowed_scan_root=tmp_path, report_dir=tmp_path / "reports")
+    llm_finding = FileFinding(
+        line_start=3,
+        line_end=3,
+        verdict=Verdict.tp,
+        confidence=0.92,
+        normalized_cwe="CWE-078",
+        source_evidence="cmd = input('Command: ')",
+        data_flow_evidence="cmd flows to os.system(cmd)",
+        reasoning_summary="input reaches os.system",
+    )
+
+    records, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([semgrep_finding(line=4, snippet="os.system(cmd)")]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(source, mode="hybrid")
+
+    assert len(records) == 1
+    assert records[0].detectors == ["llm", "semgrep"]
+    assert records[0].line_start == 4
+    assert len(records[0].underlying_finding_ids) == 2
+    assert records[0].underlying_rule_ids == ["llm.full-file", "python.lang.security.audit.dangerous-system-call"]
+    assert {location["detector"] for location in records[0].detector_locations} == {"llm", "semgrep"}
+    assert {location["line_start"] for location in records[0].detector_locations} == {4}
+    assert {location["original_start_line"] for location in records[0].detector_locations} == {None, 3}
+
+
+def test_hybrid_differing_detector_statuses_merge_but_require_review(tmp_path: Path):
+    source = tmp_path / "app.py"
+    source.write_text("import os\ncmd = input('Command: ')\nos.system(cmd)\n", encoding="utf-8")
+    settings = Settings(allowed_scan_root=tmp_path, report_dir=tmp_path / "reports")
+    llm_finding = FileFinding(line_start=3, line_end=3, verdict=Verdict.tp, confidence=0.9, normalized_cwe="CWE-078", sink_evidence="os.system(cmd)", reasoning_summary="command injection")
+
+    records, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([semgrep_finding(line=3, snippet="os.system(cmd)")]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(source, mode="hybrid")
+
+    assert len(records) == 1
+    assert records[0].agreement_status == "detector_disagreement"
+    assert records[0].status == FindingStatus.needs_review
+    assert records[0].needs_human_review is True
+    assert records[0].user_classification == "UNCERTAIN"
+
+
+def test_hybrid_merges_live_report_os_system_prose_and_rule_slug(tmp_path: Path):
+    source = tmp_path / "example.py"
+    source.write_text("import os\nuser_input = input('Command: ')\nos.system(user_input)\n", encoding="utf-8")
+    settings = Settings(allowed_scan_root=tmp_path, report_dir=tmp_path / "reports")
+    llm_finding = FileFinding(
+        line_start=3,
+        line_end=3,
+        verdict=Verdict.tp,
+        confidence=0.9,
+        normalized_cwe="CWE-078",
+        reasoning_summary=(
+            "The code directly uses user input in an os.system call without any validation "
+            "or sanitization, making it vulnerable to command injection."
+        ),
+    )
+    semgrep = semgrep_finding(
+        rule_id="semgrep-rules.python.vuln-agent.python.command-injection.input-to-os-system",
+        line=4,
+        snippet="",
+        relative_file="example.py",
+    )
+
+    records, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([semgrep]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(source, mode="hybrid")
+
+    assert len(records) == 1
+    assert records[0].line_start == 4
+    assert records[0].detectors == ["llm", "semgrep"]
+    assert records[0].agreement_status == "detector_disagreement"
+    assert records[0].status == FindingStatus.needs_review
+    assert records[0].underlying_rule_ids == ["llm.full-file", "semgrep-rules.python.vuln-agent.python.command-injection.input-to-os-system"]
+    assert {location["detector"] for location in records[0].detector_locations} == {"llm", "semgrep"}
+    assert {location["line_start"] for location in records[0].detector_locations} == {3, 4}
+    assert any("os.system call" in location["reasoning_summary"] for location in records[0].detector_locations)
+    assert any(location["rule_id"].endswith("input-to-os-system") for location in records[0].detector_locations)
+
+
+def test_hybrid_distant_same_sink_flows_remain_separate(tmp_path: Path):
+    source = tmp_path / "app.py"
+    source.write_text("import os\ncmd = input('one')\nos.system(cmd)\n\n\n\nother = input('two')\nos.system(other)\n", encoding="utf-8")
+    settings = Settings(allowed_scan_root=tmp_path, report_dir=tmp_path / "reports")
+    llm_finding = FileFinding(line_start=8, line_end=8, verdict=Verdict.tp, confidence=0.91, normalized_cwe="CWE-078", sink_evidence="os.system(other)", reasoning_summary="second command injection")
+
+    records, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([semgrep_finding(line=3, snippet="os.system(cmd)")]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(source, mode="hybrid")
+
+    assert len(records) == 2
+
+
+def test_hybrid_nearby_distinct_os_system_calls_remain_separate_when_distinguishable(tmp_path: Path):
+    source = tmp_path / "app.py"
+    source.write_text("import os\nfirst = input('one')\nsecond = input('two')\nos.system(first)\nos.system(second)\n", encoding="utf-8")
+    settings = Settings(allowed_scan_root=tmp_path, report_dir=tmp_path / "reports")
+    llm_finding = FileFinding(line_start=5, line_end=5, verdict=Verdict.tp, confidence=0.91, normalized_cwe="CWE-078", sink_evidence="os.system(second)", reasoning_summary="second command injection")
+
+    records, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([semgrep_finding(line=4, snippet="os.system(first)")]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(source, mode="hybrid")
+
+    assert len(records) == 2
+
+
+def test_hybrid_nearby_same_cwe_incompatible_sinks_remain_separate(tmp_path: Path):
+    source = tmp_path / "app.py"
+    source.write_text("import os\ncmd = input('one')\nos.system(cmd)\neval(cmd)\n", encoding="utf-8")
+    settings = Settings(allowed_scan_root=tmp_path, report_dir=tmp_path / "reports")
+    llm_finding = FileFinding(line_start=4, line_end=4, verdict=Verdict.tp, confidence=0.91, normalized_cwe="CWE-078", sink_evidence="eval(cmd)", reasoning_summary="eval of user input")
+
+    records, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([semgrep_finding(line=3, snippet="os.system(cmd)")]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(source, mode="hybrid")
+
+    assert len(records) == 2
+
+
+def test_hybrid_different_files_and_cwes_remain_separate(tmp_path: Path):
+    app = tmp_path / "app.py"
+    helper = tmp_path / "helper.py"
+    app.write_text("import os\nos.system(cmd)\n", encoding="utf-8")
+    helper.write_text("eval(user)\n", encoding="utf-8")
+    settings = Settings(allowed_scan_root=tmp_path, report_dir=tmp_path / "reports")
+    llm_finding = FileFinding(line_start=1, line_end=1, verdict=Verdict.tp, confidence=0.9, normalized_cwe="CWE-094", sink_evidence="eval(user)", reasoning_summary="code injection")
+
+    records, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([semgrep_finding(relative_file="app.py")]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(helper, mode="hybrid")
+
+    assert len(records) == 2
+    assert {record.relative_file for record in records} == {"app.py", "helper.py"}
+    assert {record.normalized_cwe for record in records} == {"CWE-078", "CWE-094"}
+
+
+def test_hybrid_exact_sink_location_wins_over_approximate_source_location(tmp_path: Path):
+    source = tmp_path / "app.py"
+    source.write_text("import os\ncmd = input('Command: ')\nos.system(cmd)\n", encoding="utf-8")
+    settings = Settings(allowed_scan_root=tmp_path, report_dir=tmp_path / "reports")
+    llm_finding = FileFinding(
+        line_start=2,
+        line_end=2,
+        verdict=Verdict.tp,
+        confidence=0.99,
+        normalized_cwe="CWE-078",
+        data_flow_evidence="cmd flows to os.system(cmd)",
+        reasoning_summary="source reaches dangerous sink",
+    )
+
+    records, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([semgrep_finding(line=3, snippet="os.system(cmd)")]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(source, mode="hybrid")
+
+    assert len(records) == 1
+    assert records[0].line_start == 3
+    assert records[0].location_is_approximate is True
+    assert records[0].location_note
+    assert any(location["location_is_approximate"] for location in records[0].detector_locations)
+    assert any(location["sink_evidence"] == "os.system(cmd)" for location in records[0].detector_locations)
+
+
+def test_hybrid_group_ids_and_order_are_stable(tmp_path: Path):
+    source = tmp_path / "app.py"
+    source.write_text("import os\ncmd = input('Command: ')\nos.system(cmd)\n", encoding="utf-8")
+    settings = Settings(allowed_scan_root=tmp_path, report_dir=tmp_path / "reports")
+    llm_finding = FileFinding(line_start=3, line_end=3, verdict=Verdict.tp, confidence=0.9, normalized_cwe="CWE-078", sink_evidence="os.system(cmd)", reasoning_summary="command injection")
+
+    first, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([semgrep_finding(line=3, snippet="os.system(cmd)")]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(source, mode="hybrid")
+    second, _ = VulnerabilityOrchestrator(settings, semgrep=FakeSemgrep([semgrep_finding(line=3, snippet="os.system(cmd)")]), llm=FakeLLM(FileAnalysis(findings=[llm_finding]))).scan(source, mode="hybrid")
+
+    assert [record.group_id for record in first] == [record.group_id for record in second]
+    assert [record.underlying_finding_ids for record in first] == [record.underlying_finding_ids for record in second]
+
+
 def test_hybrid_full_file_runs_without_semgrep_findings(tmp_path: Path):
     source = tmp_path / "app.py"
     source.write_text("print('safe')\n", encoding="utf-8")
@@ -139,7 +302,8 @@ def test_true_hybrid_matching_semgrep_and_llm_findings_merge(tmp_path: Path):
         source, output_dir=tmp_path / "out", mode="hybrid", save_raw=True
     )
     assert len(records) == 1
-    assert records[0].agreement_status == "detectors_agree"
+    assert records[0].agreement_status == "detector_disagreement"
+    assert records[0].status == FindingStatus.needs_review
     assert records[0].detectors == ["llm", "semgrep"]
     raw = [json.loads(line) for line in (output_dir / "raw_findings.jsonl").read_text(encoding="utf-8").splitlines()]
     assert sorted(item["detector"] for item in raw) == ["llm", "semgrep"]
