@@ -84,6 +84,25 @@ describe('React phase 1 shell', () => {
     expect(screen.getByText(/Missing frozen artifact files/i)).toBeInTheDocument();
   });
 
+  it('marks the dashboard active model available from health when Ollama is ok', async () => {
+    mockFetch().mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/api/health')) return Response.json(healthPayload);
+      if (url.endsWith('/api/config')) return Response.json({ ...configPayload, active_model: 'different-configured-model' });
+      if (url.endsWith('/api/evaluation/frozen')) return Response.json({ available: false, run_id: 'x' });
+      return new Response('{}', { status: 404 });
+    });
+
+    renderApp();
+
+    const heading = await screen.findByRole('heading', { name: 'Active model' });
+    const card = heading.closest('article') as HTMLElement;
+    await waitFor(() => expect(within(card).getByText('qwen2.5-coder:7b')).toBeInTheDocument());
+    expect(within(card).getByText('ok')).toBeInTheDocument();
+    expect(within(card).queryByText('Unavailable')).not.toBeInTheDocument();
+    expect(within(card).queryByText('different-configured-model')).not.toBeInTheDocument();
+  });
+
   it('navigates to the health route and shows live status cards', async () => {
     mockFetch();
     renderApp('/health');

@@ -7,10 +7,11 @@ interface HealthCardProps {
   title: string;
   check?: HealthCheck;
   detail?: string;
+  status?: string;
   loading?: boolean;
 }
 
-export function HealthCard({ title, check, detail, loading }: HealthCardProps) {
+export function HealthCard({ title, check, detail, status, loading }: HealthCardProps) {
   if (loading) {
     return (
       <article className="health-card">
@@ -24,7 +25,7 @@ export function HealthCard({ title, check, detail, loading }: HealthCardProps) {
     <article className="health-card">
       <div className="health-card__top">
         <h3>{title}</h3>
-        {check ? <StatusBadge status={check.status} /> : <StatusBadge status="unavailable" label="Unavailable" />}
+        {check ? <StatusBadge status={check.status} /> : <StatusBadge status={status ?? 'unavailable'} label={status ? undefined : 'Unavailable'} />}
       </div>
       <p>{detail ?? check?.message ?? check?.error ?? 'No detail reported.'}</p>
       {check ? (

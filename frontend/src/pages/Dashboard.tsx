@@ -20,6 +20,9 @@ export function Dashboard() {
   const config = useConfig();
   const evaluation = useFrozenEvaluation();
   const checks = health.data?.checks ?? [];
+  const ollama = checks.find((check) => check.name === 'Ollama');
+  const activeModel = health.data?.active_model?.trim() ?? '';
+  const activeModelAvailable = Boolean(activeModel) && ollama?.status === 'ok';
 
   return (
     <div className="page-stack">
@@ -38,11 +41,12 @@ export function Dashboard() {
       <section className="status-grid" aria-label="System status summary">
         <HealthCard title="Backend API" check={checks.find((check) => check.name === 'Backend API')} loading={health.isLoading} />
         <HealthCard title="Semgrep" check={checks.find((check) => check.name === 'Semgrep')} loading={health.isLoading} />
-        <HealthCard title="Ollama" check={checks.find((check) => check.name === 'Ollama')} loading={health.isLoading} />
+        <HealthCard title="Ollama" check={ollama} loading={health.isLoading} />
         <HealthCard
           title="Active model"
-          detail={config.data?.active_model ?? 'Model unavailable until configuration loads.'}
-          loading={config.isLoading}
+          detail={activeModel || config.data?.active_model || 'Model unavailable until health check completes.'}
+          status={activeModelAvailable ? 'ok' : 'unavailable'}
+          loading={health.isLoading}
         />
       </section>
 
