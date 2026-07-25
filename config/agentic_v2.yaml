@@ -1,0 +1,30 @@
+supported_cwes:
+  - CWE-078
+  - CWE-089
+
+budgets:
+  max_candidates: 20
+  max_passes_per_candidate: 2
+  max_reviewer_cycles: 1
+  max_llm_calls: 50
+  max_total_steps: 100
+
+safety:
+  read_only: true
+  execute_target_code: false
+  modify_target_files: false
+  allow_cloud_models: false
+
+routing:
+  shell_indicators:
+    - os.system
+    - os.popen
+    - subprocess.run
+    - subprocess.Popen
+    - subprocess.call
+
+  sql_indicators:
+    - cursor.execute
+    - execute
+    - executemany
+    - raw
