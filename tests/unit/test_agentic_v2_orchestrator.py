@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 from vuln_agent.agentic_v2.artifacts import AgenticArtifactManager
@@ -60,11 +61,11 @@ def _finding(index: int, cwe: str = "CWE-078") -> SemgrepFinding:
     )
 
 
-def _decision(candidate_id: str = "finding-00") -> str:
+def _decision(candidate_id: str = "finding-00", cwe: str = "CWE-078") -> str:
     return json.dumps(
         {
             "candidate_id": candidate_id,
-            "proposed_cwe": "CWE-078",
+            "proposed_cwe": cwe,
             "source_supported": True,
             "propagation_supported": True,
             "sink_supported": True,
@@ -287,3 +288,138 @@ def test_terminal_mapping():
     assert terminal_from_review(
         candidate, validator, ReviewerDecision(candidate_id="c1", decision=ReviewerVerdict.reject)
     ).terminal_state is TerminalState.rejected
+
+
+def _fixture_repo(name: str) -> Path:
+    return Path(__file__).parents[1] / "fixtures" / "agentic_v2" / name
+
+
+def test_phase5_fixture_expected_terminal_behaviors(tmp_path: Path):
+    cases = [
+        ("cwe078_vulnerable", "CWE-078", _finding(0, "CWE-078"), [_decision(), _review()], TerminalState.confirmed),
+        ("cwe078_safe_overwrite", "CWE-078", _finding(0, "CWE-078"), [_decision(), _review()], TerminalState.rejected),
+        (
+            "cwe078_missing_helper",
+            "CWE-078",
+            _finding(0, "CWE-078"),
+            [_decision(), _review(decision="needs_more_evidence", follow_up_action="more_context"), _decision(), _review(decision="human_review")],
+            TerminalState.human_review_required,
+        ),
+        ("cwe089_vulnerable", "CWE-089", _finding(0, "CWE-089"), [_decision(cwe="CWE-089"), _review()], TerminalState.confirmed),
+        ("cwe089_parameterized", "CWE-089", _finding(0, "CWE-089"), [_decision(cwe="CWE-089"), _review()], TerminalState.rejected),
+    ]
+    for name, cwe, finding, responses, expected in cases:
+        finding.relative_file = "app.py"
+        finding.line_start = 6
+        finding.line_end = 6
+        result = AgenticV2Orchestrator(
+            semgrep=FakeSemgrep([finding]),
+            llm=FakeLLM(responses),
+            artifacts=AgenticArtifactManager(tmp_path / f"runs-{name}"),
+        ).run(_fixture_repo(name), [cwe], auto_approve=True, auto_review_policy="keep")
+
+        assert result.decisions[0].terminal_state is expected
+
+
+def test_no_relevant_api_fixture_skips_during_routing(tmp_path: Path):
+    result = AgenticV2Orchestrator(
+        semgrep=FakeSemgrep([]),
+        llm=FakeLLM([]),
+        artifacts=AgenticArtifactManager(tmp_path / "runs"),
+    ).run(_fixture_repo("no_relevant_apis"), ["CWE-078", "CWE-089"], auto_approve=True)
+
+    plan = json.loads((result.run_dir / "scan_plan.json").read_text(encoding="utf-8"))
+    assert plan["active_cwes"] == []
+    assert plan["skipped_cwes"] == {
+        "CWE-078": "no shell indicators found",
+        "CWE-089": "no SQL or database indicators found",
+    }
+
+
+def test_human_review_auto_keep_is_recorded_in_events_and_report(tmp_path: Path):
+    repo = _repo(tmp_path)
+    llm = FakeLLM([_decision(), _review(decision="human_review")])
+
+    result = AgenticV2Orchestrator(
+        semgrep=FakeSemgrep([_finding(0)]),
+        llm=llm,
+        artifacts=AgenticArtifactManager(tmp_path / "runs"),
+    ).run(repo, ["CWE-078"], auto_approve=True, auto_review_policy="keep")
+
+    assert result.human_review_decisions == [
+        {
+            "candidate_id": "finding-00",
+            "action": "keep",
+            "terminal_state": "HUMAN_REVIEW_REQUIRED",
+            "known_evidence": ["rule-00", "review fixture"],
+            "missing_evidence": ["review fixture"],
+        }
+    ]
+    report = json.loads((result.run_dir / "final_report.json").read_text(encoding="utf-8"))
+    assert report["human_review_decisions"] == result.human_review_decisions
+    events = (result.run_dir / "events.jsonl").read_text(encoding="utf-8")
+    assert "human_review_decision" in events
+
+
+def test_human_review_accept_reject_keep_and_stop_flow(tmp_path: Path):
+    repo = _repo(tmp_path)
+    findings = [_finding(0), _finding(1), _finding(2), _finding(3)]
+    responses = []
+    for index in range(4):
+        responses.extend([_decision(f"finding-{index:02d}"), _review(f"finding-{index:02d}", decision="human_review")])
+    review_inputs = iter(["a", "r", "u", "s"])
+    result = AgenticV2Orchestrator(
+        semgrep=FakeSemgrep(findings),
+        llm=FakeLLM(responses),
+        artifacts=AgenticArtifactManager(tmp_path / "runs"),
+    ).run(repo, ["CWE-078"], auto_approve=True, auto_review_policy="manual", input_func=lambda _prompt: next(review_inputs))
+
+    assert [item["action"] for item in result.human_review_decisions or []] == ["accept", "reject", "keep", "stop"]
+    assert [decision.terminal_state for decision in result.decisions] == [
+        TerminalState.confirmed,
+        TerminalState.rejected,
+        TerminalState.human_review_required,
+        TerminalState.human_review_required,
+    ]
+    state = json.loads((result.run_dir / "state.json").read_text(encoding="utf-8"))
+    assert state["human_review_stopped"] is True
+
+
+def test_phase5_run_writes_required_six_artifacts_and_preserves_repository(tmp_path: Path):
+    source_repo = _fixture_repo("cwe078_missing_helper")
+    repo = tmp_path / "repo"
+    shutil.copytree(source_repo, repo)
+    before = {path.relative_to(repo): path.read_text(encoding="utf-8") for path in repo.rglob("*") if path.is_file()}
+    llm = FakeLLM([_decision(), _review(decision="needs_more_evidence", follow_up_action="assignment_history"), _decision(), _review(decision="human_review")])
+
+    result = AgenticV2Orchestrator(
+        semgrep=FakeSemgrep([_finding(0)]),
+        llm=llm,
+        artifacts=AgenticArtifactManager(tmp_path / "runs"),
+    ).run(repo, ["CWE-078", "CWE-089"], auto_approve=True, auto_review_policy="keep")
+
+    assert sorted(path.name for path in result.run_dir.iterdir()) == [
+        "events.jsonl",
+        "final_report.json",
+        "findings.json",
+        "run_manifest.json",
+        "scan_plan.json",
+        "state.json",
+    ]
+    after = {path.relative_to(repo): path.read_text(encoding="utf-8") for path in repo.rglob("*") if path.is_file()}
+    assert after == before
+    assert len(llm.prompts) == 4
+    assert "assignment_history" in llm.prompts[2]
+    assert result.decisions[0].terminal_state is TerminalState.human_review_required
+
+
+def test_step_budget_stops_before_model_call(tmp_path: Path):
+    repo = _repo(tmp_path)
+    orchestrator = AgenticV2Orchestrator(
+        semgrep=FakeSemgrep([_finding(0)]),
+        llm=FakeLLM([]),
+        artifacts=AgenticArtifactManager(tmp_path / "runs"),
+    )
+    orchestrator.max_total_steps = 0
+    result = orchestrator.run(repo, ["CWE-078"], auto_approve=True)
+    assert result.decisions[0].terminal_state is TerminalState.tool_error

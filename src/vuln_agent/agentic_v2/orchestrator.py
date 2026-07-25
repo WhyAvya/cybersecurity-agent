@@ -41,6 +41,7 @@ class AgenticRunResult:
     approved: bool
     candidates: list[CandidateFinding]
     decisions: list[ReasonerDecision | ValidatorDecision]
+    human_review_decisions: list[dict[str, Any]] | None = None
 
 
 class AgenticV2Orchestrator:
@@ -128,6 +129,13 @@ class AgenticV2Orchestrator:
             steps_used += used_steps
             decisions.append(terminal)
 
+        human_review_decisions = self._human_review_checkpoint(
+            run_id,
+            candidates,
+            decisions,
+            auto_review_policy=auto_review_policy,
+            input_func=input_func,
+        )
         self.artifacts.write_json(run_id, "findings.json", {"candidates": [c.model_dump(mode="json") for c in candidates]})
         self.artifacts.write_json(
             run_id,
@@ -137,14 +145,66 @@ class AgenticV2Orchestrator:
                 "candidate_count": len(candidates),
                 "llm_calls_used": llm_calls_used,
                 "steps_used": steps_used,
+                "human_review_decision_count": len(human_review_decisions),
+                "human_review_stopped": any(decision["action"] == "stop" for decision in human_review_decisions),
             },
         )
         self.artifacts.write_json(
             run_id,
             "final_report.json",
-            {"decisions": [_model_dump(decision) for decision in decisions]},
+            {
+                "decisions": [_model_dump(decision) for decision in decisions],
+                "human_review_decisions": human_review_decisions,
+            },
         )
-        return AgenticRunResult(run_id, run_dir, True, candidates, decisions)
+        return AgenticRunResult(run_id, run_dir, True, candidates, decisions, human_review_decisions)
+
+    def _human_review_checkpoint(
+        self,
+        run_id: str,
+        candidates: list[CandidateFinding],
+        decisions: list[ReasonerDecision | ValidatorDecision],
+        *,
+        auto_review_policy: str,
+        input_func,
+    ) -> list[dict[str, Any]]:
+        decisions_by_id = {decision.candidate_id: decision for decision in decisions}
+        review_decisions: list[dict[str, Any]] = []
+        for candidate in candidates:
+            decision = decisions_by_id.get(candidate.candidate_id)
+            if not isinstance(decision, ValidatorDecision):
+                continue
+            if decision.terminal_state is not TerminalState.human_review_required:
+                continue
+            action = "keep" if auto_review_policy == "keep" else _prompt_for_human_review(candidate, decision, input_func)
+            final_state = {
+                "accept": TerminalState.confirmed,
+                "reject": TerminalState.rejected,
+                "keep": TerminalState.human_review_required,
+                "stop": TerminalState.human_review_required,
+            }[action]
+            if action in {"accept", "reject"}:
+                decision.terminal_state = final_state
+                decision.reason = f"human checkpoint 2 {action}: {decision.reason}"
+            record = {
+                "candidate_id": candidate.candidate_id,
+                "action": action,
+                "terminal_state": final_state.value,
+                "known_evidence": _known_evidence(candidate, decision),
+                "missing_evidence": _missing_evidence(decision),
+            }
+            review_decisions.append(record)
+            self.artifacts.append_event(
+                run_id,
+                AgentEvent(
+                    event_id=f"human-review-{candidate.candidate_id}-{len(review_decisions)}",
+                    event_type="human_review_decision",
+                    payload=record,
+                ),
+            )
+            if action == "stop":
+                break
+        return review_decisions
 
     def _investigate_candidate(
         self,
@@ -480,6 +540,31 @@ def _prompt_for_approval(route_payload: dict[str, Any], input_func) -> bool:
     print("Candidate budget: 20")
     print("Safety policy: read_only=True execute_target_code=False modify_target_files=False allow_cloud_models=False")
     return input_func("Approve scan plan? [y/n] ").strip().lower() == "y"
+
+
+def _prompt_for_human_review(candidate: CandidateFinding, decision: ValidatorDecision, input_func) -> str:
+    print(f"Finding: {candidate.candidate_id} {candidate.relative_file}:{candidate.line_start}")
+    print(f"CWE: {candidate.proposed_cwe}")
+    print(f"Known evidence: {_known_evidence(candidate, decision)}")
+    print(f"Missing evidence: {_missing_evidence(decision)}")
+    choices = {"a": "accept", "r": "reject", "u": "keep", "s": "stop"}
+    while True:
+        response = input_func("Review finding? [A=accept/R=reject/U=keep human review/S=stop] ").strip().lower()
+        if response in choices:
+            return choices[response]
+
+
+def _known_evidence(candidate: CandidateFinding, decision: ValidatorDecision) -> list[str]:
+    evidence = [candidate.summary]
+    if decision.reason:
+        evidence.append(decision.reason)
+    return evidence
+
+
+def _missing_evidence(decision: ValidatorDecision) -> list[str]:
+    if decision.terminal_state is TerminalState.human_review_required:
+        return [decision.reason or "additional evidence needed"]
+    return []
 
 
 def _route_payload(route: RouteDecision, active_cwes: list[str]) -> dict[str, Any]:
