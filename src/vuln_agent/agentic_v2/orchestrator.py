@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,13 +14,24 @@ from pydantic import BaseModel
 from vuln_agent.config import Settings
 from vuln_agent.exceptions import SchemaParseError, ToolError
 from vuln_agent.llm import LLMClient, OllamaClient
+from vuln_agent.orchestrator import validate_plan_b_file_finding
+from vuln_agent.schemas import FileFinding, Verdict
 from vuln_agent.semgrep import SemgrepAdapter
 from vuln_agent.utils import parse_model_json
 
 from .artifacts import AgenticArtifactManager
 from .inventory import RouteDecision, inspect_repository
-from .models import AgentEvent, CandidateFinding, ReasonerDecision, TerminalState, ValidatorDecision
-from .prompts import REASONER_SYSTEM_PROMPT
+from .models import (
+    AgentEvent,
+    CandidateFinding,
+    FollowUpAction,
+    ReasonerDecision,
+    ReviewerDecision,
+    ReviewerVerdict,
+    TerminalState,
+    ValidatorDecision,
+)
+from .prompts import REASONER_SYSTEM_PROMPT, REVIEWER_SYSTEM_PROMPT
 
 
 @dataclass(frozen=True)
@@ -43,6 +55,11 @@ class AgenticV2Orchestrator:
         self.semgrep = semgrep or SemgrepAdapter(self.settings)
         self.llm = llm or OllamaClient(self.settings)
         self.artifacts = artifacts or AgenticArtifactManager(self.settings.artifact_root / "agentic-runs")
+        self.max_candidates = 20
+        self.max_passes_per_candidate = 2
+        self.max_reviewer_cycles = 1
+        self.max_llm_calls = 50
+        self.max_total_steps = 100
 
     def run(
         self,
@@ -91,35 +108,127 @@ class AgenticV2Orchestrator:
         semgrep_event = {"finding_count": len(findings), "metadata": metadata.model_dump(mode="json")}
         self.artifacts.append_event(run_id, AgentEvent(event_id="semgrep-complete", event_type="semgrep", payload=semgrep_event))
 
-        candidates = _normalize_candidates(findings, active_cwes, self.settings.max_agent_iterations * 0 + 20)
+        candidates = _normalize_candidates(findings, active_cwes, self.max_candidates)
         if len([f for f in findings if f.normalized_cwe in active_cwes]) > len(candidates):
             self.artifacts.append_event(
                 run_id,
                 AgentEvent(
                     event_id="candidate-budget-truncated",
                     event_type="budget",
-                    payload={"max_candidates": 20},
+                    payload={"max_candidates": self.max_candidates},
                 ),
             )
 
         decisions: list[ReasonerDecision | ValidatorDecision] = []
+        llm_calls_used = 0
+        steps_used = 0
         for candidate in candidates:
-            context = extract_candidate_context(root, candidate.relative_file, candidate.line_start)
-            payload = _reasoner_payload(candidate, context, active_cwes)
-            self.artifacts.append_event(
-                run_id,
-                AgentEvent(event_id=f"reasoner-start-{candidate.candidate_id}", event_type="reasoner_start", payload=payload),
-            )
-            decisions.append(self._reason(candidate, payload))
+            terminal, used_calls, used_steps = self._investigate_candidate(run_id, root, candidate, active_cwes, llm_calls_used, steps_used)
+            llm_calls_used += used_calls
+            steps_used += used_steps
+            decisions.append(terminal)
 
         self.artifacts.write_json(run_id, "findings.json", {"candidates": [c.model_dump(mode="json") for c in candidates]})
-        self.artifacts.write_json(run_id, "state.json", {"approved": True, "candidate_count": len(candidates)})
+        self.artifacts.write_json(
+            run_id,
+            "state.json",
+            {
+                "approved": True,
+                "candidate_count": len(candidates),
+                "llm_calls_used": llm_calls_used,
+                "steps_used": steps_used,
+            },
+        )
         self.artifacts.write_json(
             run_id,
             "final_report.json",
             {"decisions": [_model_dump(decision) for decision in decisions]},
         )
         return AgenticRunResult(run_id, run_dir, True, candidates, decisions)
+
+    def _investigate_candidate(
+        self,
+        run_id: str,
+        root: Path,
+        candidate: CandidateFinding,
+        active_cwes: list[str],
+        prior_llm_calls: int,
+        prior_steps: int,
+    ) -> tuple[ValidatorDecision, int, int]:
+        llm_calls = 0
+        steps = 0
+        follow_up = FollowUpAction.none
+        validator = ValidatorDecision(candidate_id=candidate.candidate_id, terminal_state=TerminalState.tool_error)
+        reviewer = ReviewerDecision(candidate_id=candidate.candidate_id, decision=ReviewerVerdict.human_review)
+        for pass_number in range(1, self.max_passes_per_candidate + 1):
+            if prior_steps + steps >= self.max_total_steps or prior_llm_calls + llm_calls >= self.max_llm_calls:
+                validator = ValidatorDecision(
+                    candidate_id=candidate.candidate_id,
+                    terminal_state=TerminalState.tool_error,
+                    reason="Agentic v2 budget exhausted.",
+                )
+                return validator, llm_calls, steps
+            evidence = collect_evidence(root, candidate, follow_up)
+            reasoner_payload = _reasoner_payload(candidate, evidence, active_cwes, pass_number)
+            self.artifacts.append_event(
+                run_id,
+                AgentEvent(
+                    event_id=f"reasoner-start-{candidate.candidate_id}-pass-{pass_number}",
+                    event_type="reasoner_start",
+                    payload=reasoner_payload,
+                ),
+            )
+            reasoner = self._reason(candidate, reasoner_payload)
+            llm_calls += 1 if isinstance(reasoner, ReasonerDecision) else 2
+            steps += 1
+            if isinstance(reasoner, ValidatorDecision):
+                return reasoner, llm_calls, steps
+            validator = validate_reasoner_decision(candidate, reasoner, evidence)
+            self.artifacts.append_event(
+                run_id,
+                AgentEvent(
+                    event_id=f"validator-{candidate.candidate_id}-pass-{pass_number}",
+                    event_type="validator",
+                    payload=validator.model_dump(mode="json"),
+                ),
+            )
+            reviewer_payload = _reviewer_payload(candidate, reasoner, validator, evidence, pass_number)
+            self.artifacts.append_event(
+                run_id,
+                AgentEvent(
+                    event_id=f"reviewer-start-{candidate.candidate_id}-pass-{pass_number}",
+                    event_type="reviewer_start",
+                    payload=reviewer_payload,
+                ),
+            )
+            reviewer = self._review(candidate, reviewer_payload)
+            llm_calls += 1 if isinstance(reviewer, ReviewerDecision) else 2
+            steps += 1
+            if isinstance(reviewer, ValidatorDecision):
+                return reviewer, llm_calls, steps
+            terminal = terminal_from_review(candidate, validator, reviewer)
+            self.artifacts.append_event(
+                run_id,
+                AgentEvent(
+                    event_id=f"terminal-{candidate.candidate_id}-pass-{pass_number}",
+                    event_type="terminal_decision",
+                    payload=terminal.model_dump(mode="json"),
+                ),
+            )
+            if terminal.terminal_state != TerminalState.human_review_required:
+                return terminal, llm_calls, steps
+            if pass_number == self.max_passes_per_candidate or reviewer.follow_up_action is FollowUpAction.none:
+                return terminal, llm_calls, steps
+            follow_up = reviewer.follow_up_action
+            self.artifacts.append_event(
+                run_id,
+                AgentEvent(
+                    event_id=f"evidence-request-{candidate.candidate_id}-pass-{pass_number}",
+                    event_type="evidence_request",
+                    payload={"follow_up_action": follow_up.value, "next_pass": pass_number + 1},
+                ),
+            )
+        return terminal_from_review(candidate, validator, reviewer), llm_calls, steps
 
     def _reason(self, candidate: CandidateFinding, payload: dict[str, Any]) -> ReasonerDecision | ValidatorDecision:
         prompt = _build_reasoner_prompt(payload)
@@ -134,6 +243,21 @@ class AgenticV2Orchestrator:
                     candidate_id=candidate.candidate_id,
                     terminal_state=TerminalState.tool_error,
                     reason="Reasoner returned malformed JSON after one repair attempt.",
+                )
+
+    def _review(self, candidate: CandidateFinding, payload: dict[str, Any]) -> ReviewerDecision | ValidatorDecision:
+        prompt = _build_reviewer_prompt(payload)
+        try:
+            return _generate_reviewer(self.llm, prompt)
+        except SchemaParseError:
+            repair_prompt = f"{REVIEWER_SYSTEM_PROMPT}\nRepair this response into valid ReviewerDecision JSON only."
+            try:
+                return _generate_reviewer(self.llm, repair_prompt)
+            except SchemaParseError:
+                return ValidatorDecision(
+                    candidate_id=candidate.candidate_id,
+                    terminal_state=TerminalState.tool_error,
+                    reason="Reviewer returned malformed JSON after one repair attempt.",
                 )
 
 
@@ -169,7 +293,16 @@ def _normalize_candidates(findings: list[Any], active_cwes: list[str], max_candi
     return candidates
 
 
-def extract_candidate_context(root: Path, relative_file: str, line: int) -> dict[str, Any]:
+def collect_evidence(root: Path, candidate: CandidateFinding, follow_up: FollowUpAction = FollowUpAction.none) -> dict[str, Any]:
+    context = extract_candidate_context(root, candidate.relative_file, candidate.line_start)
+    if follow_up is FollowUpAction.more_context:
+        context["additional_context"] = extract_candidate_context(root, candidate.relative_file, candidate.line_start, radius=25)["source"]
+    elif follow_up is FollowUpAction.assignment_history:
+        context["assignment_history"] = assignment_history(root, candidate.relative_file)
+    return context
+
+
+def extract_candidate_context(root: Path, relative_file: str, line: int, radius: int = 10) -> dict[str, Any]:
     path = _resolve_inside(root, root / relative_file)
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -177,7 +310,7 @@ def extract_candidate_context(root: Path, relative_file: str, line: int) -> dict
     try:
         tree = ast.parse(text)
     except SyntaxError:
-        return {"relative_file": relative_file, "imports": imports, "source": _window(lines, line)}
+        return {"relative_file": relative_file, "imports": imports, "source": _window(lines, line, radius=radius)}
     best = None
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -189,8 +322,23 @@ def extract_candidate_context(root: Path, relative_file: str, line: int) -> dict
         start, end = best
         source = "\n".join(lines[start - 1 : end])
     else:
-        source = _window(lines, line)
+        source = _window(lines, line, radius=radius)
     return {"relative_file": relative_file, "imports": imports, "source": source}
+
+
+def assignment_history(root: Path, relative_file: str) -> list[str]:
+    path = _resolve_inside(root, root / relative_file)
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    rows = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets = []
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    targets.append(target.id)
+            if targets:
+                rows.append(f"line {node.lineno}: {', '.join(sorted(targets))}")
+    return rows
 
 
 def _import_lines(text: str) -> list[str]:
@@ -208,7 +356,7 @@ def _window(lines: list[str], line: int, radius: int = 10) -> str:
     return "\n".join(lines[start:end])
 
 
-def _reasoner_payload(candidate: CandidateFinding, context: dict[str, Any], active_cwes: list[str]) -> dict[str, Any]:
+def _reasoner_payload(candidate: CandidateFinding, context: dict[str, Any], active_cwes: list[str], pass_number: int = 1) -> dict[str, Any]:
     return {
         "candidate": {
             "candidate_id": candidate.candidate_id,
@@ -222,11 +370,37 @@ def _reasoner_payload(candidate: CandidateFinding, context: dict[str, Any], acti
         "context": context,
         "semgrep_evidence": {"rule_id": candidate.summary, "line": candidate.line_start},
         "active_cwe_scope": active_cwes,
+        "pass_number": pass_number,
+    }
+
+
+def _reviewer_payload(
+    candidate: CandidateFinding,
+    reasoner: ReasonerDecision,
+    validator: ValidatorDecision,
+    evidence: dict[str, Any],
+    pass_number: int,
+) -> dict[str, Any]:
+    return {
+        "candidate": {
+            "candidate_id": candidate.candidate_id,
+            "file": candidate.relative_file,
+            "line": candidate.line_start,
+            "candidate_cwe": candidate.proposed_cwe,
+        },
+        "reasoner_output": reasoner.model_dump(mode="json"),
+        "validator_result": validator.model_dump(mode="json"),
+        "collected_evidence": evidence,
+        "pass_number": pass_number,
     }
 
 
 def _build_reasoner_prompt(payload: dict[str, Any]) -> str:
     return REASONER_SYSTEM_PROMPT + "\n" + json.dumps(payload, indent=2, sort_keys=True)
+
+
+def _build_reviewer_prompt(payload: dict[str, Any]) -> str:
+    return REVIEWER_SYSTEM_PROMPT + "\n" + json.dumps(payload, indent=2, sort_keys=True)
 
 
 def _generate_reasoner(llm: LLMClient, prompt: str) -> ReasonerDecision:
@@ -235,6 +409,66 @@ def _generate_reasoner(llm: LLMClient, prompt: str) -> ReasonerDecision:
         return ReasonerDecision.model_validate(parse_model_json(result.raw_text, ReasonerDecision).model_dump())
     result = llm.generate_structured(prompt, ReasonerDecision)
     return ReasonerDecision.model_validate(result.parsed.model_dump())
+
+
+def _generate_reviewer(llm: LLMClient, prompt: str) -> ReviewerDecision:
+    if hasattr(llm, "generate_raw"):
+        result = llm.generate_raw(prompt)  # type: ignore[attr-defined]
+        return ReviewerDecision.model_validate(parse_model_json(result.raw_text, ReviewerDecision).model_dump())
+    result = llm.generate_structured(prompt, ReviewerDecision)
+    return ReviewerDecision.model_validate(result.parsed.model_dump())
+
+
+def validate_reasoner_decision(
+    candidate: CandidateFinding,
+    reasoner: ReasonerDecision,
+    evidence: dict[str, Any],
+) -> ValidatorDecision:
+    if candidate.proposed_cwe not in {"CWE-078", "CWE-089"}:
+        return ValidatorDecision(
+            candidate_id=candidate.candidate_id,
+            terminal_state=TerminalState.out_of_scope,
+            reason="Candidate CWE is outside the active Plan B v2 scope.",
+        )
+    verdict = Verdict.tp if reasoner.source_supported and reasoner.propagation_supported and reasoner.sink_supported else Verdict.uncertain
+    file_finding = FileFinding(
+        line_start=candidate.line_start,
+        line_end=candidate.line_end,
+        verdict=verdict,
+        confidence=reasoner.confidence,
+        normalized_cwe=candidate.proposed_cwe,
+        reasoning_summary=reasoner.rationale or "agentic v2 reasoner decision",
+        source_evidence="source evidence" if reasoner.source_supported else "",
+        sink_evidence=evidence.get("source", ""),
+        data_flow_evidence="source reaches sink" if reasoner.propagation_supported else "",
+        sanitization_evidence=reasoner.sanitization_summary,
+    )
+    checked = validate_plan_b_file_finding(file_finding, evidence.get("source", ""))
+    passed = checked.verdict == Verdict.tp
+    return ValidatorDecision(
+        candidate_id=candidate.candidate_id,
+        terminal_state=TerminalState.confirmed if passed else TerminalState.rejected,
+        reason="deterministic validation passed" if passed else checked.reasoning_summary,
+        confidence=checked.confidence,
+    )
+
+
+def terminal_from_review(
+    candidate: CandidateFinding,
+    validator: ValidatorDecision,
+    reviewer: ReviewerDecision,
+) -> ValidatorDecision:
+    if validator.terminal_state is TerminalState.out_of_scope:
+        return validator
+    if reviewer.decision is ReviewerVerdict.accept and validator.terminal_state is TerminalState.confirmed:
+        return ValidatorDecision(candidate_id=candidate.candidate_id, terminal_state=TerminalState.confirmed, reason="reviewer accepted and validator passed")
+    if reviewer.decision is ReviewerVerdict.reject:
+        return ValidatorDecision(candidate_id=candidate.candidate_id, terminal_state=TerminalState.rejected, reason=reviewer.rationale)
+    if reviewer.decision is ReviewerVerdict.human_review:
+        return ValidatorDecision(candidate_id=candidate.candidate_id, terminal_state=TerminalState.human_review_required, reason=reviewer.rationale)
+    if reviewer.decision is ReviewerVerdict.needs_more_evidence:
+        return ValidatorDecision(candidate_id=candidate.candidate_id, terminal_state=TerminalState.human_review_required, reason=reviewer.rationale)
+    return ValidatorDecision(candidate_id=candidate.candidate_id, terminal_state=TerminalState.rejected, reason=validator.reason)
 
 
 def _prompt_for_approval(route_payload: dict[str, Any], input_func) -> bool:

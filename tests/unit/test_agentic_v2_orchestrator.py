@@ -3,7 +3,13 @@ from pathlib import Path
 
 from vuln_agent.agentic_v2.artifacts import AgenticArtifactManager
 from vuln_agent.agentic_v2.models import ReasonerDecision
-from vuln_agent.agentic_v2.orchestrator import AgenticV2Orchestrator, extract_candidate_context
+from vuln_agent.agentic_v2.orchestrator import (
+    AgenticV2Orchestrator,
+    extract_candidate_context,
+    terminal_from_review,
+    validate_reasoner_decision,
+)
+from vuln_agent.agentic_v2.models import ReviewerDecision, ReviewerVerdict, TerminalState, ValidatorDecision
 from vuln_agent.schemas import ModelMetadata, SemgrepFinding, Severity, ToolMetadata
 
 
@@ -70,6 +76,17 @@ def _decision(candidate_id: str = "finding-00") -> str:
     )
 
 
+def _review(candidate_id: str = "finding-00", decision: str = "accept", follow_up_action: str = "none") -> str:
+    return json.dumps(
+        {
+            "candidate_id": candidate_id,
+            "decision": decision,
+            "follow_up_action": follow_up_action,
+            "rationale": "review fixture",
+        }
+    )
+
+
 def _repo(tmp_path: Path, source: str | None = None) -> Path:
     text = source or "import os\n\ndef handler():\n    user_input = input('x')\n    os.system(user_input)\n"
     (tmp_path / "app.py").write_text(text, encoding="utf-8")
@@ -79,7 +96,7 @@ def _repo(tmp_path: Path, source: str | None = None) -> Path:
 def test_orchestrator_calls_existing_semgrep_and_inventory_drives_routing(tmp_path: Path):
     repo = _repo(tmp_path)
     semgrep = FakeSemgrep([_finding(0)])
-    llm = FakeLLM([_decision()])
+    llm = FakeLLM([_decision(), _review()])
 
     result = AgenticV2Orchestrator(semgrep=semgrep, llm=llm, artifacts=AgenticArtifactManager(tmp_path / "runs")).run(
         repo, ["CWE-078", "CWE-089"], auto_approve=True
@@ -110,28 +127,28 @@ def test_cli_approval_decision_is_recorded(tmp_path: Path):
 def test_reasoner_receives_fresh_context_each_call(tmp_path: Path):
     repo = _repo(tmp_path)
     semgrep = FakeSemgrep([_finding(0), _finding(1)])
-    llm = FakeLLM([_decision("finding-00"), _decision("finding-01")])
+    llm = FakeLLM([_decision("finding-00"), _review("finding-00"), _decision("finding-01"), _review("finding-01")])
 
     AgenticV2Orchestrator(semgrep=semgrep, llm=llm, artifacts=AgenticArtifactManager(tmp_path / "runs")).run(
         repo, ["CWE-078"], auto_approve=True
     )
 
-    assert len(llm.prompts) == 2
+    assert len(llm.prompts) == 4
     assert "finding-00" in llm.prompts[0]
-    assert "finding-01" in llm.prompts[1]
-    assert llm.prompts[0] != llm.prompts[1]
+    assert "finding-01" in llm.prompts[2]
+    assert llm.prompts[0] != llm.prompts[2]
 
 
 def test_reasoner_payload_excludes_benchmark_ground_truth_fields(tmp_path: Path):
     repo = _repo(tmp_path)
     semgrep = FakeSemgrep([_finding(0)])
-    llm = FakeLLM([_decision()])
+    llm = FakeLLM([_decision(), _review()])
 
     AgenticV2Orchestrator(semgrep=semgrep, llm=llm, artifacts=AgenticArtifactManager(tmp_path / "runs")).run(
         repo, ["CWE-078"], auto_approve=True
     )
 
-    prompt = llm.prompts[0].lower()
+    prompt = "\n".join(llm.prompts).lower()
     for prohibited in ("benchmarktest", "ground_truth", "expected_cwe", "expected_label", "benchmark target"):
         assert prohibited not in prompt
 
@@ -139,14 +156,14 @@ def test_reasoner_payload_excludes_benchmark_ground_truth_fields(tmp_path: Path)
 def test_malformed_json_gets_one_repair_attempt(tmp_path: Path):
     repo = _repo(tmp_path)
     semgrep = FakeSemgrep([_finding(0)])
-    llm = FakeLLM(["not json", _decision()])
+    llm = FakeLLM(["not json", _decision(), _review()])
 
     result = AgenticV2Orchestrator(semgrep=semgrep, llm=llm, artifacts=AgenticArtifactManager(tmp_path / "runs")).run(
         repo, ["CWE-078"], auto_approve=True
     )
 
-    assert len(llm.prompts) == 2
-    assert isinstance(result.decisions[0], ReasonerDecision)
+    assert len(llm.prompts) == 3
+    assert result.decisions[0].terminal_state is TerminalState.confirmed
 
 
 def test_second_malformed_response_becomes_tool_error(tmp_path: Path):
@@ -165,7 +182,10 @@ def test_second_malformed_response_becomes_tool_error(tmp_path: Path):
 def test_candidate_budget_is_enforced_and_event_written(tmp_path: Path):
     repo = _repo(tmp_path)
     semgrep = FakeSemgrep([_finding(i) for i in range(25)])
-    llm = FakeLLM([_decision(f"finding-{i:02d}") for i in range(20)])
+    responses = []
+    for i in range(20):
+        responses.extend([_decision(f"finding-{i:02d}"), _review(f"finding-{i:02d}")])
+    llm = FakeLLM(responses)
 
     result = AgenticV2Orchestrator(semgrep=semgrep, llm=llm, artifacts=AgenticArtifactManager(tmp_path / "runs")).run(
         repo, ["CWE-078"], auto_approve=True
@@ -189,3 +209,81 @@ def test_context_extraction_uses_containing_function_and_imports(tmp_path: Path)
     assert context["imports"] == ["import os", "import sqlite3"]
     assert "def handler" in context["source"]
     assert "def first" not in context["source"]
+
+
+def test_existing_validator_is_reused_for_safe_shell_rejection(tmp_path: Path):
+    repo = _repo(
+        tmp_path,
+        "import subprocess\n\ndef handler():\n    subprocess.run(['git', 'status'], shell=False)\n",
+    )
+    candidate = _finding(0).model_dump()
+    validator = validate_reasoner_decision(
+        candidate=type("Candidate", (), {"candidate_id": "c1", "line_start": 4, "line_end": 4, "proposed_cwe": "CWE-078"})(),
+        reasoner=ReasonerDecision(
+            candidate_id="c1",
+            proposed_cwe="CWE-078",
+            source_supported=True,
+            propagation_supported=True,
+            sink_supported=True,
+            confidence=0.9,
+            rationale="source reaches subprocess",
+        ),
+        evidence={"source": (repo / "app.py").read_text(encoding="utf-8")},
+    )
+    assert validator.terminal_state is TerminalState.rejected
+    assert "shell=False" in validator.reason or "command sink" in validator.reason
+
+
+def test_reviewer_prompt_payload_differs_from_reasoner_and_has_no_hidden_history(tmp_path: Path):
+    repo = _repo(tmp_path)
+    semgrep = FakeSemgrep([_finding(0)])
+    llm = FakeLLM([_decision(), _review()])
+    AgenticV2Orchestrator(semgrep=semgrep, llm=llm, artifacts=AgenticArtifactManager(tmp_path / "runs")).run(
+        repo, ["CWE-078"], auto_approve=True
+    )
+    assert "security reasoner" in llm.prompts[0]
+    assert "skeptical reviewer" in llm.prompts[1]
+    assert "hidden" not in llm.prompts[1].lower()
+    assert "ground_truth" not in llm.prompts[1].lower()
+
+
+def test_two_pass_evidence_loop_and_no_third_pass(tmp_path: Path):
+    repo = _repo(tmp_path)
+    semgrep = FakeSemgrep([_finding(0)])
+    llm = FakeLLM(
+        [
+            _decision(),
+            _review(decision="needs_more_evidence", follow_up_action="assignment_history"),
+            _decision(),
+            _review(decision="human_review"),
+        ]
+    )
+    result = AgenticV2Orchestrator(semgrep=semgrep, llm=llm, artifacts=AgenticArtifactManager(tmp_path / "runs")).run(
+        repo, ["CWE-078"], auto_approve=True
+    )
+    assert len(llm.prompts) == 4
+    assert "assignment_history" in llm.prompts[2]
+    assert result.decisions[0].terminal_state is TerminalState.human_review_required
+
+
+def test_llm_budget_stops_before_model_call(tmp_path: Path):
+    repo = _repo(tmp_path)
+    orchestrator = AgenticV2Orchestrator(
+        semgrep=FakeSemgrep([_finding(0)]),
+        llm=FakeLLM([]),
+        artifacts=AgenticArtifactManager(tmp_path / "runs"),
+    )
+    orchestrator.max_llm_calls = 0
+    result = orchestrator.run(repo, ["CWE-078"], auto_approve=True)
+    assert result.decisions[0].terminal_state is TerminalState.tool_error
+
+
+def test_terminal_mapping():
+    candidate = type("Candidate", (), {"candidate_id": "c1"})()
+    validator = ValidatorDecision(candidate_id="c1", terminal_state=TerminalState.confirmed)
+    assert terminal_from_review(
+        candidate, validator, ReviewerDecision(candidate_id="c1", decision=ReviewerVerdict.accept)
+    ).terminal_state is TerminalState.confirmed
+    assert terminal_from_review(
+        candidate, validator, ReviewerDecision(candidate_id="c1", decision=ReviewerVerdict.reject)
+    ).terminal_state is TerminalState.rejected
