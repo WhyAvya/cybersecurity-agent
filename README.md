@@ -38,6 +38,45 @@ The hardened scanner is a post-Week-6 engineering revision. Frozen benchmark met
 
 User scans report grouped findings and user-facing classifications such as `VULNERABLE`, `LIKELY_VULNERABLE`, `REJECTED`, `UNCERTAIN`, and `ERROR`; they do not claim benchmark TP/FP ground truth for arbitrary files. Model confidence is uncalibrated model-reported confidence.
 
+## Plan B v2 Bounded Agentic MVP
+
+Plan B v2 exists to make the frozen Plan B v1 workflow more adaptive, auditable, and demo-ready without changing the v1 detector, Semgrep rules, validators, prompts, Hybrid logic, model configuration, thresholds, or evaluation artifacts. It adds a deterministic control layer around repository inventory, routing, evidence collection, local-model reasoning, deterministic validation, skeptical review, and human checkpoints.
+
+One open-source local LLM is used sequentially in isolated reasoner and
+reviewer roles. A deterministic orchestrator controls planning, routing,
+tools, validation, safety, memory, and stopping conditions.
+
+Plan B v1 remains the quantitative hybrid benchmark baseline. Plan B v2 is an architectural and behavioral MVP: it reuses existing Semgrep and validator behavior, adds adaptive CWE routing for local Python repositories, limits analysis to `CWE-078` and `CWE-089`, and saves a reproducible decision trace.
+
+The v2 flow is:
+
+1. Inventory Python files using static filesystem inspection only.
+2. Route to `CWE-078` when shell indicators exist and to `CWE-089` when SQL/database indicators exist.
+3. Present human checkpoint 1 for scan-plan approval, unless `--auto-approve` is used.
+4. Run the existing Semgrep wrapper and normalize findings into at most 20 candidates.
+5. Extract bounded same-file context, then run isolated reasoner and reviewer calls through the local LLM.
+6. Reuse deterministic validators so model decisions cannot override failed safety checks.
+7. Allow one additional evidence pass for more local context or AST assignment history.
+8. Escalate unresolved findings to human review; `--auto-review-policy keep` preserves those findings as `HUMAN_REVIEW_REQUIRED`.
+
+Safety policy: v2 accepts local repository paths only, keeps target repositories read-only, resolves paths inside the supplied repository, does not import or execute target code, does not install target dependencies, does not run target tests, and does not clone GitHub URLs.
+
+CLI example:
+
+```powershell
+python scripts/run_agentic_v2.py `
+  --repository tests/fixtures/agentic_v2/cwe078_vulnerable `
+  --cwes CWE-078 CWE-089 `
+  --auto-approve `
+  --auto-review-policy keep
+```
+
+Each run writes six artifacts under the configured agentic artifact root: `run_manifest.json`, `scan_plan.json`, `events.jsonl`, `findings.json`, `state.json`, and `final_report.json`.
+
+Verified Phase 1-5 evidence includes focused tests for models, inventory, orchestration, reviewer integration, human review, and six demo fixtures, plus the latest full unit suite result of `199 passed, 2 skipped`. Limitations remain: Python only, two CWEs only, CLI only, same-file context, no full interprocedural call graph, one extra evidence pass, no automatic remediation, no robust resume engine, and no completed large external v2 benchmark.
+
+Future work includes external benchmark execution, richer repository-language support, stronger interprocedural evidence, resume support, calibrated reporting, and broader human-review ergonomics.
+
 ## Technology Stack
 
 Python 3.10, Pydantic, Requests, PyYAML, Pytest, Docker, Semgrep, Ollama, and `qwen2.5-coder:7b`.
