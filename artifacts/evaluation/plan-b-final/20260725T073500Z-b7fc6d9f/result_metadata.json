@@ -1,0 +1,43 @@
+{
+  "end_timestamp": null,
+  "errors": {
+    "hybrid": 0,
+    "llm": 0,
+    "semgrep": 0,
+    "semgrep_gated": 0
+  },
+  "final_run_id": "20260725T073500Z-b7fc6d9f",
+  "final_run_path": "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f",
+  "frozen_plan_b_commit": "3d04c911b12a91cd5a5033ee13711b5669a5d7a0",
+  "hashes": {
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/failures/false_negatives.jsonl": "4bb6daaa0dc215921633a4293968c168ee9a3eeaca5e1c8d0afe755a3459e843",
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/failures/false_positives.jsonl": "cc5df6976dca8fe786470197ba4899a56a74c7da7e907efd82fe34ef4c6a0787",
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/failures/taxonomy.csv": "813adda82a3025d2a7d5caaa5cec13866768c897d4ac4da3a2b178c8dff5ae8c",
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/manifest.json": "7c4f380fe6ccdb3d24c6c5aa4b6f325e3b2414ec29d74165f3bc962ec3d05136",
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/metrics/per_cwe.csv": "99caaccde83ebb6d8eb84dbf4a345621607c7bbbcc68d9ebe78ca92cc1080bf2",
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/metrics/summary.csv": "f1f6c0da04339680752fc9e4d0e4399510238afce6f53a1eb9cfe7c48d8f58c3",
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/predictions/hybrid.jsonl": "415d4428d813c317c46aeddef43161e80e70b5a4d63b576f053464578ce3bc5c",
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/predictions/llm.jsonl": "87c11621ebb4a563db5f09ca3fd433ecd04862e83958ab0851a0f211d7c4f35a",
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/predictions/semgrep.jsonl": "deb8e316debee38602051f6aa8e4be3c43397ea1aa14ad8aa09bd67485d57370",
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/predictions/semgrep_gated.jsonl": "3eb6c4414bb65549d1d692af035b625151a9f7761b722aff55f0cabbdc239cdb",
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/reports/executive_summary.md": "b8b676e317acb4e32098cf00eebd731962b218f1419f7a65e1fe6793d9fba3f6",
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/reports/final_evaluation_report.md": "85290a86fb44a6054f3ae2226e9c4dbbb80c7d9c271271b05969c97b19304533",
+    "docs/plan_b/PLAN_B_FINAL_REPORT.md": "bff1b9a5dd8ca12dfcde50bdd309aed028053db2915921bde994129c17b49953",
+    "semgrep-rules/python/command-injection.yaml": "ac5b645847a610c33f78a101b64551e353664d6d09f903bd55cfea4996525dda",
+    "semgrep-rules/python/sql-injection.yaml": "1888629647e5d5d8df6c8250adfa2129c1a8222a829cdb0e10865bd0102940d1",
+    "src/vuln_agent/prompts.py": "dc27ccdbbfc866443831b8f1ca84814bb5d6002d3a851bd7009386126a0a021e"
+  },
+  "model": "qwen2.5-coder:7b",
+  "prompt_hash": "dc27ccdbbfc866443831b8f1ca84814bb5d6002d3a851bd7009386126a0a021e",
+  "recorded_timestamp_utc": "2026-07-25T07:49:40.351031+00:00",
+  "ruleset_hash": "7aa50937bff2abe66a9c87b9783962e27afcd7a5d84bf2a257bfd55da49f58e5",
+  "schema_version": 1,
+  "semgrep_version": "1.165.0",
+  "start_timestamp": "2026-07-25T07:38:38.828429+00:00",
+  "timeouts": {
+    "hybrid": 0,
+    "llm": 0,
+    "semgrep": 0,
+    "semgrep_gated": 0
+  }
+}
