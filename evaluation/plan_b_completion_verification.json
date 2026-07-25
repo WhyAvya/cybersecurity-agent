@@ -1,0 +1,300 @@
+{
+  "branch": "frontend-streamlit-v1",
+  "conclusion": "Plan B is complete, frozen, and its final run is immutable. In the observed scoped comparison, Plan B improves Hybrid F1, accuracy, recall, and false-positive rate relative to Plan A. Plan B still has a high CWE-078 false-positive rate, and a larger confirmatory evaluation is still needed.",
+  "current_head": "935e2aac2c6ef7fcaddb244f31d93feaa608f020",
+  "discrepancy": null,
+  "git_clean_status_before_record": true,
+  "observed_hybrid_comparison": {
+    "accuracy_change": 0.25,
+    "f1_change": 0.157,
+    "false_positive_rate_change": -0.4,
+    "note": "Descriptive only: Plan A and Plan B differ in sample size and CWE scope, so this is not a universal apples-to-apples claim.",
+    "precision_change": 0.167,
+    "recall_change": 0.1
+  },
+  "official_plan_a_metrics": {
+    "hybrid": {
+      "accuracy": 0.5,
+      "attempted_count": 20,
+      "completed_count": 20,
+      "error_rate": 0.0,
+      "f1": 0.643,
+      "false_positive_rate": 0.9,
+      "fn": 1,
+      "fp": 9,
+      "precision": 0.5,
+      "recall": 0.9,
+      "tn": 1,
+      "tp": 9
+    },
+    "llm": {
+      "accuracy": 0.5,
+      "attempted_count": 20,
+      "completed_count": 20,
+      "error_rate": 0.0,
+      "f1": 0.643,
+      "false_positive_rate": 0.9,
+      "fn": 1,
+      "fp": 9,
+      "precision": 0.5,
+      "recall": 0.9,
+      "tn": 1,
+      "tp": 9
+    },
+    "semgrep": {
+      "accuracy": 0.5,
+      "attempted_count": 20,
+      "completed_count": 20,
+      "error_rate": 0.0,
+      "f1": 0.0,
+      "false_positive_rate": 0.0,
+      "fn": 10,
+      "fp": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "tn": 10,
+      "tp": 0
+    },
+    "semgrep_gated": {
+      "accuracy": 0.5,
+      "attempted_count": 20,
+      "completed_count": 20,
+      "error_rate": 0.0,
+      "f1": 0.0,
+      "false_positive_rate": 0.0,
+      "fn": 10,
+      "fp": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "tn": 10,
+      "tp": 0
+    }
+  },
+  "official_plan_b_metrics": {
+    "hybrid": {
+      "accuracy": 0.75,
+      "attempted_count": 8,
+      "completed_count": 8,
+      "error_rate": 0.0,
+      "f1": 0.8,
+      "false_positive_rate": 0.5,
+      "fn": 0,
+      "fp": 2,
+      "precision": 0.667,
+      "recall": 1.0,
+      "tn": 2,
+      "tp": 4
+    },
+    "llm": {
+      "accuracy": 0.625,
+      "attempted_count": 8,
+      "completed_count": 8,
+      "error_rate": 0.0,
+      "f1": 0.667,
+      "false_positive_rate": 0.5,
+      "fn": 1,
+      "fp": 2,
+      "precision": 0.6,
+      "recall": 0.75,
+      "tn": 2,
+      "tp": 3
+    },
+    "semgrep": {
+      "accuracy": 0.75,
+      "attempted_count": 8,
+      "completed_count": 8,
+      "error_rate": 0.0,
+      "f1": 0.667,
+      "false_positive_rate": 0.0,
+      "fn": 2,
+      "fp": 0,
+      "precision": 1.0,
+      "recall": 0.5,
+      "tn": 4,
+      "tp": 2
+    },
+    "semgrep_gated": {
+      "accuracy": 0.75,
+      "attempted_count": 8,
+      "completed_count": 8,
+      "error_rate": 0.0,
+      "f1": 0.667,
+      "false_positive_rate": 0.0,
+      "fn": 2,
+      "fp": 0,
+      "precision": 1.0,
+      "recall": 0.5,
+      "tn": 4,
+      "tp": 2
+    }
+  },
+  "plan_a_integrity_status": "verified unchanged",
+  "plan_a_run_id": "20260724T144625Z-fdcefdf2",
+  "plan_a_run_path": "artifacts/evaluation/20260724T144625Z-fdcefdf2",
+  "plan_b_freeze_commit": "3d04c911b12a91cd5a5033ee13711b5669a5d7a0",
+  "plan_b_immutable_status": "verified unchanged; predictions, metrics, reports, and result metadata hashes match persisted records",
+  "plan_b_results_commit": "935e2aac2c6ef7fcaddb244f31d93feaa608f020",
+  "plan_b_run_id": "20260725T073500Z-b7fc6d9f",
+  "plan_b_run_path": "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f",
+  "reader_results": {
+    "plan_a": {
+      "available": true,
+      "mode_rows": 4,
+      "run_id": "20260724T144625Z-fdcefdf2"
+    },
+    "plan_b": {
+      "available": true,
+      "mode_rows": 4,
+      "per_cwe_rows": 8,
+      "run_id": "20260725T073500Z-b7fc6d9f"
+    }
+  },
+  "repository_root": "C:\\Users\\sharm\\Documents\\AGENTIC2\\AGENTIC3-frontend",
+  "schema_version": 1,
+  "test_results": {
+    "git_diff_check": "passed",
+    "unit": "155 passed, 1 skipped"
+  },
+  "verification_timestamp_utc": "2026-07-25T08:08:34.557433+00:00",
+  "verified_hashes": {
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/failures/false_negatives.jsonl": {
+      "actual": "4bb6daaa0dc215921633a4293968c168ee9a3eeaca5e1c8d0afe755a3459e843",
+      "recorded": "4bb6daaa0dc215921633a4293968c168ee9a3eeaca5e1c8d0afe755a3459e843",
+      "verified": true
+    },
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/failures/false_positives.jsonl": {
+      "actual": "cc5df6976dca8fe786470197ba4899a56a74c7da7e907efd82fe34ef4c6a0787",
+      "recorded": "cc5df6976dca8fe786470197ba4899a56a74c7da7e907efd82fe34ef4c6a0787",
+      "verified": true
+    },
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/failures/taxonomy.csv": {
+      "actual": "813adda82a3025d2a7d5caaa5cec13866768c897d4ac4da3a2b178c8dff5ae8c",
+      "recorded": "813adda82a3025d2a7d5caaa5cec13866768c897d4ac4da3a2b178c8dff5ae8c",
+      "verified": true
+    },
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/manifest.json": {
+      "actual": "7c4f380fe6ccdb3d24c6c5aa4b6f325e3b2414ec29d74165f3bc962ec3d05136",
+      "recorded": "7c4f380fe6ccdb3d24c6c5aa4b6f325e3b2414ec29d74165f3bc962ec3d05136",
+      "verified": true
+    },
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/metrics/per_cwe.csv": {
+      "actual": "99caaccde83ebb6d8eb84dbf4a345621607c7bbbcc68d9ebe78ca92cc1080bf2",
+      "recorded": "99caaccde83ebb6d8eb84dbf4a345621607c7bbbcc68d9ebe78ca92cc1080bf2",
+      "verified": true
+    },
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/metrics/summary.csv": {
+      "actual": "f1f6c0da04339680752fc9e4d0e4399510238afce6f53a1eb9cfe7c48d8f58c3",
+      "recorded": "f1f6c0da04339680752fc9e4d0e4399510238afce6f53a1eb9cfe7c48d8f58c3",
+      "verified": true
+    },
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/predictions/hybrid.jsonl": {
+      "actual": "415d4428d813c317c46aeddef43161e80e70b5a4d63b576f053464578ce3bc5c",
+      "recorded": "415d4428d813c317c46aeddef43161e80e70b5a4d63b576f053464578ce3bc5c",
+      "verified": true
+    },
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/predictions/llm.jsonl": {
+      "actual": "87c11621ebb4a563db5f09ca3fd433ecd04862e83958ab0851a0f211d7c4f35a",
+      "recorded": "87c11621ebb4a563db5f09ca3fd433ecd04862e83958ab0851a0f211d7c4f35a",
+      "verified": true
+    },
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/predictions/semgrep.jsonl": {
+      "actual": "deb8e316debee38602051f6aa8e4be3c43397ea1aa14ad8aa09bd67485d57370",
+      "recorded": "deb8e316debee38602051f6aa8e4be3c43397ea1aa14ad8aa09bd67485d57370",
+      "verified": true
+    },
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/predictions/semgrep_gated.jsonl": {
+      "actual": "3eb6c4414bb65549d1d692af035b625151a9f7761b722aff55f0cabbdc239cdb",
+      "recorded": "3eb6c4414bb65549d1d692af035b625151a9f7761b722aff55f0cabbdc239cdb",
+      "verified": true
+    },
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/reports/executive_summary.md": {
+      "actual": "b8b676e317acb4e32098cf00eebd731962b218f1419f7a65e1fe6793d9fba3f6",
+      "recorded": "b8b676e317acb4e32098cf00eebd731962b218f1419f7a65e1fe6793d9fba3f6",
+      "verified": true
+    },
+    "artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/reports/final_evaluation_report.md": {
+      "actual": "85290a86fb44a6054f3ae2226e9c4dbbb80c7d9c271271b05969c97b19304533",
+      "recorded": "85290a86fb44a6054f3ae2226e9c4dbbb80c7d9c271271b05969c97b19304533",
+      "verified": true
+    },
+    "docs/plan_b/PLAN_B_FINAL_REPORT.md": {
+      "actual": "bff1b9a5dd8ca12dfcde50bdd309aed028053db2915921bde994129c17b49953",
+      "recorded": "bff1b9a5dd8ca12dfcde50bdd309aed028053db2915921bde994129c17b49953",
+      "verified": true
+    },
+    "freeze::evaluation/ground_truth.json": {
+      "actual": "e2b4fc053a65551a05838a951427d724838c76af67fce31e6f95f2e1f4dfd248",
+      "recorded": "e2b4fc053a65551a05838a951427d724838c76af67fce31e6f95f2e1f4dfd248",
+      "verified": true
+    },
+    "freeze::evaluation/plan_b_manifest.json": {
+      "actual": "a423ec5dacb132a1cc96756467d9a5f4d3e6916184e2a079d1279506792de137",
+      "recorded": "a423ec5dacb132a1cc96756467d9a5f4d3e6916184e2a079d1279506792de137",
+      "verified": true
+    },
+    "freeze::semgrep-rules/python": {
+      "recorded": "7aa50937bff2abe66a9c87b9783962e27afcd7a5d84bf2a257bfd55da49f58e5",
+      "verified": true
+    },
+    "freeze::semgrep-rules/python/command-injection.yaml": {
+      "actual": "ac5b645847a610c33f78a101b64551e353664d6d09f903bd55cfea4996525dda",
+      "recorded": "ac5b645847a610c33f78a101b64551e353664d6d09f903bd55cfea4996525dda",
+      "verified": true
+    },
+    "freeze::semgrep-rules/python/sql-injection.yaml": {
+      "actual": "1888629647e5d5d8df6c8250adfa2129c1a8222a829cdb0e10865bd0102940d1",
+      "recorded": "1888629647e5d5d8df6c8250adfa2129c1a8222a829cdb0e10865bd0102940d1",
+      "verified": true
+    },
+    "freeze::src/vuln_agent/config.py": {
+      "actual": "bd84b7944cb0d904bd49752600a80f4f0996270978308ae1564ee05711ea8e58",
+      "recorded": "bd84b7944cb0d904bd49752600a80f4f0996270978308ae1564ee05711ea8e58",
+      "verified": true
+    },
+    "freeze::src/vuln_agent/evaluation.py": {
+      "actual": "330027afcfb0029bce561149737f6085ba46662e44340a835e00f079f9120ca1",
+      "recorded": "330027afcfb0029bce561149737f6085ba46662e44340a835e00f079f9120ca1",
+      "verified": true
+    },
+    "freeze::src/vuln_agent/orchestrator.py": {
+      "actual": "0a9e043a982d21dfdea47772bed707119f7b1159bf1a884f6ce84b4adf1920ac",
+      "recorded": "0a9e043a982d21dfdea47772bed707119f7b1159bf1a884f6ce84b4adf1920ac",
+      "verified": true
+    },
+    "freeze::src/vuln_agent/prompts.py": {
+      "actual": "dc27ccdbbfc866443831b8f1ca84814bb5d6002d3a851bd7009386126a0a021e",
+      "recorded": "dc27ccdbbfc866443831b8f1ca84814bb5d6002d3a851bd7009386126a0a021e",
+      "verified": true
+    },
+    "freeze::src/vuln_agent/schemas.py": {
+      "actual": "77f5bda84dd604ad24269aaf9ce496f2c8a8ec1bf7801f16b450dd970da23936",
+      "recorded": "77f5bda84dd604ad24269aaf9ce496f2c8a8ec1bf7801f16b450dd970da23936",
+      "verified": true
+    },
+    "freeze::src/vuln_agent/web_api/app.py": {
+      "actual": "55fb507fa580cdc0dffaa1eb10ccf192418ac5304a421ff7019f5132a722fdfc",
+      "recorded": "55fb507fa580cdc0dffaa1eb10ccf192418ac5304a421ff7019f5132a722fdfc",
+      "verified": true
+    },
+    "freeze::src/vuln_agent/web_api/evaluation_reader.py": {
+      "actual": "c8b271176e18d7e57b5c6fa91e6da24371978535d2696c77901e8c2310e5a6c9",
+      "recorded": "c8b271176e18d7e57b5c6fa91e6da24371978535d2696c77901e8c2310e5a6c9",
+      "verified": true
+    },
+    "semgrep-rules/python/command-injection.yaml": {
+      "actual": "ac5b645847a610c33f78a101b64551e353664d6d09f903bd55cfea4996525dda",
+      "recorded": "ac5b645847a610c33f78a101b64551e353664d6d09f903bd55cfea4996525dda",
+      "verified": true
+    },
+    "semgrep-rules/python/sql-injection.yaml": {
+      "actual": "1888629647e5d5d8df6c8250adfa2129c1a8222a829cdb0e10865bd0102940d1",
+      "recorded": "1888629647e5d5d8df6c8250adfa2129c1a8222a829cdb0e10865bd0102940d1",
+      "verified": true
+    },
+    "src/vuln_agent/prompts.py": {
+      "actual": "dc27ccdbbfc866443831b8f1ca84814bb5d6002d3a851bd7009386126a0a021e",
+      "recorded": "dc27ccdbbfc866443831b8f1ca84814bb5d6002d3a851bd7009386126a0a021e",
+      "verified": true
+    }
+  }
+}
