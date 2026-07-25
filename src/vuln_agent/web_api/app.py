@@ -61,7 +61,7 @@ def get_config():
 
 @app.get("/api/evaluation/frozen")
 def get_evaluation():
-    return read_frozen_evaluation(Path(scanner_settings.evaluation_dir))
+    return read_frozen_evaluation(Path(scanner_settings.evaluation_dir), scanner_settings.evaluation_run_path)
 
 
 @app.post("/api/sources/paste")
@@ -160,5 +160,4 @@ def download_artifact(scan_id: str, artifact_path: str):
     if not path:
         raise HTTPException(status_code=404, detail=ApiError(code="ARTIFACT_NOT_FOUND", message="Artifact was not found.", stage="downloading_artifact").model_dump())
     return FileResponse(path, filename=path.name)
-
 

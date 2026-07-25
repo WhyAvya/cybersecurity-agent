@@ -271,6 +271,8 @@ class EvaluationPrediction(BaseModel):
     predicted_vulnerable: bool
     expected_cwe: str = "NONE"
     predicted_cwe: str = "NONE"
+    line_start: int | None = Field(default=None, ge=1)
+    line_end: int | None = Field(default=None, ge=1)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     latency_ms: int | None = Field(default=None, ge=0)
     schema_valid: bool = True

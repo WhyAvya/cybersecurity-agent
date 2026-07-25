@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import time
 import zipfile
 from pathlib import Path
@@ -117,6 +118,63 @@ def test_evaluation_reader_reports_missing_frozen_artifacts(tmp_path: Path) -> N
     assert "Missing frozen artifact files" in payload["error"]
 
 
+def test_evaluation_reader_loads_nested_canonical_run_by_explicit_path(tmp_path: Path) -> None:
+    run = tmp_path / "plan-b-pilot" / "run-a"
+    _write_canonical_evaluation_run(run, "run-a")
+
+    payload = read_frozen_evaluation(tmp_path, run)
+
+    assert payload["available"] is True
+    assert payload["run_id"] == "run-a"
+    assert payload["mode_comparison"][0]["mode"] == "semgrep"
+    assert payload["hybrid_agreement"][0]["agreement"] == "agree_vulnerable"
+
+
+def test_evaluation_reader_reports_missing_canonical_files_for_explicit_path(tmp_path: Path) -> None:
+    run = tmp_path / "plan-b-pilot" / "run-missing"
+    run.mkdir(parents=True)
+    (run / "manifest.json").write_text('{"run_id":"run-missing"}', encoding="utf-8")
+
+    payload = read_frozen_evaluation(tmp_path, run)
+
+    assert payload["available"] is False
+    assert "Missing canonical evaluation artifact files" in payload["error"]
+
+
+def test_evaluation_reader_does_not_select_newest_run_without_explicit_path(tmp_path: Path) -> None:
+    _write_canonical_evaluation_run(tmp_path / "newer-run", "newer-run")
+
+    payload = read_frozen_evaluation(tmp_path)
+
+    assert payload["available"] is False
+    assert payload["run_id"] != "newer-run"
+
+
+def _write_canonical_evaluation_run(run: Path, run_id: str) -> None:
+    (run / "metrics").mkdir(parents=True)
+    (run / "predictions").mkdir()
+    (run / "manifest.json").write_text(
+        json.dumps({"run_id": run_id, "mode": "all", "sample_size": 1, "selected_ids": ["BenchmarkTest00001"]}),
+        encoding="utf-8",
+    )
+    (run / "metrics" / "summary.csv").write_text(
+        "mode,tp,fp,tn,fn,precision,recall,f1,accuracy\nsemgrep,1,0,0,0,1,1,1,1\n",
+        encoding="utf-8",
+    )
+    (run / "metrics" / "per_cwe.csv").write_text(
+        "mode,cwe,sample_count,tp,fp,tn,fn\nsemgrep,CWE-078,1,1,0,0,0\n",
+        encoding="utf-8",
+    )
+    for mode in ("semgrep", "llm", "semgrep_gated", "hybrid"):
+        row = {
+            "test_id": "BenchmarkTest00001",
+            "expected_vulnerable": True,
+            "predicted_vulnerable": True,
+            "detector_agreement": "agree_vulnerable" if mode == "hybrid" else None,
+        }
+        (run / "predictions" / f"{mode}.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+
 def test_job_state_transitions_with_mocked_scanner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import vuln_agent.web_api.jobs as jobs_module
 
@@ -143,4 +201,3 @@ def test_job_state_transitions_with_mocked_scanner(tmp_path: Path, monkeypatch: 
     assert current.result is not None
     assert current.result["status_label"] == "No findings detected"
     assert current.artifacts
-

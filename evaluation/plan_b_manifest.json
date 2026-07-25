@@ -1,0 +1,108 @@
+{
+  "experiment_name": "Plan B coverage-aligned evaluation",
+  "validated_scope": [
+    "CWE-078",
+    "CWE-089"
+  ],
+  "implementation_commit": "18dc76246691bdc04aefd941db6ad558de81a8e9",
+  "selected_modes": [
+    "semgrep",
+    "llm",
+    "semgrep_gated",
+    "hybrid"
+  ],
+  "final_cases": [
+    {
+      "test_id": "BenchmarkTest00431",
+      "expected_vulnerable": true,
+      "expected_cwe": "CWE-078",
+      "role": "final"
+    },
+    {
+      "test_id": "BenchmarkTest00432",
+      "expected_vulnerable": true,
+      "expected_cwe": "CWE-078",
+      "role": "final"
+    },
+    {
+      "test_id": "BenchmarkTest00900",
+      "expected_vulnerable": false,
+      "expected_cwe": "CWE-078",
+      "role": "final"
+    },
+    {
+      "test_id": "BenchmarkTest01097",
+      "expected_vulnerable": false,
+      "expected_cwe": "CWE-078",
+      "role": "final"
+    },
+    {
+      "test_id": "BenchmarkTest00454",
+      "expected_vulnerable": true,
+      "expected_cwe": "CWE-089",
+      "role": "final"
+    },
+    {
+      "test_id": "BenchmarkTest00455",
+      "expected_vulnerable": true,
+      "expected_cwe": "CWE-089",
+      "role": "final"
+    },
+    {
+      "test_id": "BenchmarkTest00285",
+      "expected_vulnerable": false,
+      "expected_cwe": "CWE-089",
+      "role": "final"
+    },
+    {
+      "test_id": "BenchmarkTest00286",
+      "expected_vulnerable": false,
+      "expected_cwe": "CWE-089",
+      "role": "final"
+    }
+  ],
+  "sampling_method": "predeclared manual balanced selection based on audit criteria",
+  "case_counts": {
+    "total_cases": 8,
+    "vulnerable_cases": 4,
+    "safe_cases": 4,
+    "per_cwe_balance": {
+      "CWE-078": {
+        "total_cases": 4,
+        "vulnerable_cases": 2,
+        "safe_cases": 2
+      },
+      "CWE-089": {
+        "total_cases": 4,
+        "vulnerable_cases": 2,
+        "safe_cases": 2
+      }
+    }
+  },
+  "semgrep_config_path": "semgrep-rules/python",
+  "model": "qwen2.5-coder:7b",
+  "timeout_policy": {
+    "semgrep_timeout_seconds": 120,
+    "semgrep_version_timeout_seconds": 10,
+    "ollama_timeout_seconds": 120,
+    "failed_or_timed_out_cases": "Retained as attempted error records and excluded from TP/FP/FN/TN."
+  },
+  "scoring_policy": {
+    "accepted_positive": "predicted vulnerable",
+    "uncertain": "non-positive and counted separately",
+    "needs_review": "counted separately without converting failed cases to safe",
+    "failed_cases": "excluded from TP/FP/FN/TN and retained in attempted/completion/error counts",
+    "case_level": "Hybrid metrics are case-level and not inflated by multiple findings."
+  },
+  "uncertainty_handling_policy": {
+    "UNCERTAIN": "non-positive prediction and separately counted",
+    "NEEDS_REVIEW": "separately counted; detector disagreement remains review-required"
+  },
+  "duplicate_grouping_policy": {
+    "same_vulnerability_grouping": "same relative file, same normalized CWE, nearby validated locations, compatible source/sink/evidence context, and no indication of separate vulnerable operations",
+    "primary_location": "prefer exact over approximate and verified dangerous sink over source location",
+    "underlying_detector_matches": "preserved without inflating case-level metrics"
+  },
+  "plan_a_comparison_run_id": "20260724T144625Z-fdcefdf2",
+  "tuning_statement": "Final Plan B cases were predeclared from audit criteria and were not used for tuning, pilot scans, or development validation."
+}

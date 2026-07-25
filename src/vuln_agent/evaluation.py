@@ -18,12 +18,13 @@ from .config import Settings
 from .exceptions import LLMError, SchemaParseError, SecurityPolicyError, ToolError
 from .failure_taxonomy import automated_failure_category
 from .llm import OllamaClient, LLMResult
+from .orchestrator import validate_file_finding_location, validate_plan_b_file_finding
 from .prompts import build_analyzer_prompt
 from .reporting import classify_status, write_manifest
-from .schemas import AgentAnalysis, EvaluationMetrics, EvaluationPrediction, FailureRecord, FindingStatus, ModelMetadata, Verdict
+from .schemas import AgentAnalysis, EvaluationMetrics, EvaluationPrediction, FailureRecord, FileFinding, FindingStatus, ModelMetadata, Verdict
 from .semgrep import SemgrepAdapter
 from .source import fetch_context
-from .utils import normalize_cwe, parse_model_json
+from .utils import extract_json_object, normalize_cwe, parse_model_json
 
 
 COMPARISON_MODES = ("semgrep", "llm", "semgrep_gated", "hybrid")
@@ -367,6 +368,16 @@ SOURCE_CODE_END
 
 
 def generate_analysis_capture(settings: Settings, prompt: str) -> LLMResult:
+    result = generate_raw_capture(settings, prompt)
+    try:
+        parsed = parse_model_json(result.raw_text, AgentAnalysis)
+    except SchemaParseError as exc:
+        setattr(exc, "raw_text", result.raw_text)
+        raise
+    return LLMResult(parsed=parsed, raw_text=result.raw_text, metadata=result.metadata, latency_ms=result.latency_ms)
+
+
+def generate_raw_capture(settings: Settings, prompt: str) -> LLMResult:
     client = OllamaClient(settings)
     payload: dict[str, Any] = {
         "model": settings.ollama_model,
@@ -397,14 +408,9 @@ def generate_analysis_capture(settings: Settings, prompt: str) -> LLMResult:
     raw_text = body.get("response", "")
     if not isinstance(raw_text, str) or not raw_text.strip():
         raise LLMError("Ollama response did not contain text")
-    try:
-        parsed = parse_model_json(raw_text, AgentAnalysis)
-    except SchemaParseError as exc:
-        setattr(exc, "raw_text", raw_text)
-        raise
     latency_ms = int((time.perf_counter() - started) * 1000)
     return LLMResult(
-        parsed=parsed,
+        parsed=AgentAnalysis(verdict=Verdict.uncertain, confidence=0.0, normalized_cwe="NONE", reasoning_summary="Raw response captured without schema parsing."),
         raw_text=raw_text,
         metadata=ModelMetadata(
             model=settings.ollama_model,
@@ -413,6 +419,74 @@ def generate_analysis_capture(settings: Settings, prompt: str) -> LLMResult:
             duration_ms=latency_ms,
         ),
         latency_ms=latency_ms,
+    )
+
+
+def parse_full_file_analysis_for_evaluation(raw_text: str, code: str) -> tuple[AgentAnalysis, int, int]:
+    data = extract_json_object(raw_text)
+    data.setdefault("line_start", 1)
+    data.setdefault("line_end", data.get("line_start", 1))
+    data.setdefault("reasoning_summary", "")
+    item = FileFinding.model_validate(data)
+    validation_code = _evaluation_validation_context(item, code)
+    validation_item = _evaluation_validation_item(item)
+    validated_item = validate_plan_b_file_finding(validation_item, validation_code)
+    if validated_item.verdict != validation_item.verdict:
+        item = item.model_copy(
+            update={
+                "verdict": validated_item.verdict,
+                "confidence": validated_item.confidence,
+                "normalized_cwe": validated_item.normalized_cwe,
+                "reasoning_summary": f"{item.reasoning_summary} {validated_item.reasoning_summary}".strip(),
+                "needs_more_context": validated_item.needs_more_context,
+            }
+        )
+    location = validate_file_finding_location(item, code)
+    return (
+        AgentAnalysis(
+            verdict=item.verdict,
+            confidence=item.confidence,
+            normalized_cwe=item.normalized_cwe,
+            reasoning_summary=item.reasoning_summary,
+            remediation=item.remediation,
+            source_evidence=item.source_evidence,
+            sink_evidence=item.sink_evidence,
+            data_flow_evidence=item.data_flow_evidence,
+            sanitization_evidence=item.sanitization_evidence,
+            needs_more_context=item.needs_more_context,
+        ),
+        location.line_start,
+        location.line_end,
+    )
+
+
+def _evaluation_validation_context(item: FileFinding, code: str) -> str:
+    if item.verdict != Verdict.tp or normalize_cwe(item.normalized_cwe) != "CWE-089":
+        return code
+    original_lines = code.splitlines()
+    start = max(1, int(item.line_start or 1))
+    end = max(start, int(item.line_end or start))
+    selected = original_lines[start - 1 : end] if start <= len(original_lines) else []
+    if selected and any(".execute" in line for line in selected):
+        return "\n".join(selected)
+    sink = " ".join((item.sink_evidence or "").split())
+    if sink:
+        for line in original_lines:
+            if sink in " ".join(line.split()):
+                return line
+    return code
+
+
+def _evaluation_validation_item(item: FileFinding) -> FileFinding:
+    if item.verdict != Verdict.tp or normalize_cwe(item.normalized_cwe) != "CWE-089":
+        return item
+    return item.model_copy(
+        update={
+            "source_evidence": item.source_evidence or "reported source",
+            "data_flow_evidence": item.data_flow_evidence or "reported flow",
+            "sanitization_evidence": "",
+            "reasoning_summary": "",
+        }
     )
 
 
@@ -433,6 +507,8 @@ def live_prediction(
             findings, _, semgrep_raw_path = scan_semgrep_capture(settings, file_path, raw_dir, test_id)
             predicted = bool(findings)
             predicted_cwe = normalize_cwe([finding.normalized_cwe for finding in findings])
+            line_start = findings[0].line_start if findings else None
+            line_end = findings[0].line_end if findings else None
             confidence = 1.0 if predicted else 0.0
             raw_response = None
             raw_response_path = None
@@ -447,8 +523,10 @@ def live_prediction(
             status = "ACCEPTED" if predicted else "REJECTED"
         elif mode == "llm":
             code = file_path.read_text(encoding="utf-8", errors="replace")
-            result = generate_analysis_capture(settings, build_llm_benchmark_prompt(test_id, code))
-            analysis = AgentAnalysis.model_validate(result.parsed.model_dump())
+            result = generate_raw_capture(settings, build_llm_benchmark_prompt(test_id, code))
+            analysis, _line_start, _line_end = parse_full_file_analysis_for_evaluation(result.raw_text, code)
+            line_start = _line_start if analysis.verdict == Verdict.tp else None
+            line_end = _line_end if analysis.verdict == Verdict.tp else None
             predicted = analysis.verdict == Verdict.tp
             predicted_cwe = normalize_cwe(analysis.normalized_cwe)
             confidence = analysis.confidence
@@ -469,6 +547,8 @@ def live_prediction(
             if not findings:
                 predicted = False
                 predicted_cwe = "NONE"
+                line_start = None
+                line_end = None
                 confidence = 0.0
                 raw_response = None
                 raw_response_path = None
@@ -499,6 +579,8 @@ def live_prediction(
                 predicted = bool(accepted)
                 source = accepted or analyses
                 predicted_cwe = normalize_cwe([analysis.normalized_cwe for analysis in source])
+                line_start = findings[0].line_start if findings else None
+                line_end = findings[0].line_end if findings else None
                 confidence = max((analysis.confidence for analysis in source), default=0.0)
                 raw_response = "\n---RAW_RESPONSE_SEPARATOR---\n".join(raw_responses)
                 raw_response_path = write_text_artifact(raw_dir / f"{test_id}.txt", raw_response) if raw_dir else None
@@ -528,16 +610,20 @@ def live_prediction(
                 detector_errors.append(f"semgrep: {exc}")
             code = file_path.read_text(encoding="utf-8", errors="replace")
             semgrep_predicted = len(findings) > 0
+            semgrep_line_start = findings[0].line_start if findings else None
+            semgrep_line_end = findings[0].line_end if findings else None
             llm_predicted = False
+            llm_line_start = None
+            llm_line_end = None
             analysis: AgentAnalysis | None = None
             raw_response = None
             raw_response_path = None
             schema_valid = True
             try:
-                result = generate_analysis_capture(settings, build_llm_benchmark_prompt(test_id, code))
+                result = generate_raw_capture(settings, build_llm_benchmark_prompt(test_id, code))
                 raw_response = result.raw_text
                 raw_response_path = write_text_artifact(raw_dir / f"{test_id}.txt", raw_response) if raw_dir else None
-                analysis = AgentAnalysis.model_validate(result.parsed.model_dump())
+                analysis, llm_line_start, llm_line_end = parse_full_file_analysis_for_evaluation(result.raw_text, code)
                 llm_predicted = analysis.verdict == Verdict.tp
             except (LLMError, SchemaParseError, ValueError) as exc:
                 raw_response = getattr(exc, "raw_text", None)
@@ -549,9 +635,9 @@ def live_prediction(
                 [finding.normalized_cwe for finding in findings]
                 + ([analysis.normalized_cwe] if analysis is not None and llm_predicted else [])
             )
-            if predicted_cwe == "NONE" and predicted:
-                predicted_cwe = expected_cwe if expected_cwe != "NONE" else "NONE"
             confidence = max(([1.0] if semgrep_predicted else []) + ([analysis.confidence] if analysis is not None else []) + [0.0])
+            line_start = semgrep_line_start if semgrep_predicted else llm_line_start if llm_predicted else None
+            line_end = semgrep_line_end if semgrep_predicted else llm_line_end if llm_predicted else None
             semgrep_finding_count = len(findings)
             semgrep_rule_ids = sorted({finding.rule_id for finding in findings})
             llm_called = True
@@ -583,6 +669,8 @@ def live_prediction(
                 predicted_vulnerable=predicted,
                 expected_cwe=expected_cwe,
                 predicted_cwe=predicted_cwe,
+                line_start=line_start,
+                line_end=line_end,
                 confidence=confidence,
                 latency_ms=int((time.perf_counter() - started) * 1000),
                 schema_valid=schema_valid,
@@ -612,6 +700,8 @@ def live_prediction(
             predicted_vulnerable=predicted,
             expected_cwe=expected_cwe,
             predicted_cwe=predicted_cwe,
+            line_start=line_start,
+            line_end=line_end,
             confidence=confidence,
             latency_ms=int((time.perf_counter() - started) * 1000),
             schema_valid=schema_valid,

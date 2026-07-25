@@ -1,0 +1,86 @@
+﻿{
+    "schema_version":  1,
+    "branch":  "frontend-streamlit-v1",
+    "pre_freeze_head":  "18dc76246691bdc04aefd941db6ad558de81a8e9",
+    "detector_implementation_commit":  "18dc76246691bdc04aefd941db6ad558de81a8e9",
+    "timestamp_utc":  "2026-07-25T07:29:30.4587241Z",
+    "python_version":  "Python 3.10.11",
+    "semgrep_version":  "1.165.0",
+    "ollama_version":  "0.32.1",
+    "configured_model_name":  "qwen2.5-coder:7b",
+    "operating_system":  "Microsoft Windows 10.0.26200 ",
+    "accepted_plan_a_run":  "20260724T144625Z-fdcefdf2",
+    "successful_plan_b_pilot":  {
+                                    "run_id":  "20260725T070438Z-1ffabe43",
+                                    "path":  "artifacts/evaluation/plan-b-pilot/20260725T070438Z-1ffabe43",
+                                    "metrics":  {
+                                                    "semgrep":  {
+                                                                    "tp":  2,
+                                                                    "fp":  0,
+                                                                    "tn":  2,
+                                                                    "fn":  0,
+                                                                    "precision":  1,
+                                                                    "recall":  1,
+                                                                    "f1":  1,
+                                                                    "accuracy":  1,
+                                                                    "attempted_count":  4,
+                                                                    "completed_count":  4,
+                                                                    "error_rate":  0
+                                                                },
+                                                    "llm":  {
+                                                                "tp":  2,
+                                                                "fp":  0,
+                                                                "tn":  2,
+                                                                "fn":  0,
+                                                                "precision":  1,
+                                                                "recall":  1,
+                                                                "f1":  1,
+                                                                "accuracy":  1,
+                                                                "attempted_count":  4,
+                                                                "completed_count":  4,
+                                                                "error_rate":  0
+                                                            },
+                                                    "semgrep_gated":  {
+                                                                          "tp":  2,
+                                                                          "fp":  0,
+                                                                          "tn":  2,
+                                                                          "fn":  0,
+                                                                          "precision":  1,
+                                                                          "recall":  1,
+                                                                          "f1":  1,
+                                                                          "accuracy":  1,
+                                                                          "attempted_count":  4,
+                                                                          "completed_count":  4,
+                                                                          "error_rate":  0
+                                                                      },
+                                                    "hybrid":  {
+                                                                   "tp":  2,
+                                                                   "fp":  0,
+                                                                   "tn":  2,
+                                                                   "fn":  0,
+                                                                   "precision":  1,
+                                                                   "recall":  1,
+                                                                   "f1":  1,
+                                                                   "accuracy":  1,
+                                                                   "attempted_count":  4,
+                                                                   "completed_count":  4,
+                                                                   "error_rate":  0
+                                                               }
+                                                }
+                                },
+    "full_test_result":  "155 passed, 1 skipped",
+    "hashes":  {
+                   "evaluation/ground_truth.json":  "e2b4fc053a65551a05838a951427d724838c76af67fce31e6f95f2e1f4dfd248",
+                   "evaluation/plan_b_manifest.json":  "a423ec5dacb132a1cc96756467d9a5f4d3e6916184e2a079d1279506792de137",
+                   "semgrep-rules/python/command-injection.yaml":  "ac5b645847a610c33f78a101b64551e353664d6d09f903bd55cfea4996525dda",
+                   "semgrep-rules/python/sql-injection.yaml":  "1888629647e5d5d8df6c8250adfa2129c1a8222a829cdb0e10865bd0102940d1",
+                   "src/vuln_agent/prompts.py":  "dc27ccdbbfc866443831b8f1ca84814bb5d6002d3a851bd7009386126a0a021e",
+                   "src/vuln_agent/config.py":  "bd84b7944cb0d904bd49752600a80f4f0996270978308ae1564ee05711ea8e58",
+                   "src/vuln_agent/evaluation.py":  "330027afcfb0029bce561149737f6085ba46662e44340a835e00f079f9120ca1",
+                   "src/vuln_agent/orchestrator.py":  "0a9e043a982d21dfdea47772bed707119f7b1159bf1a884f6ce84b4adf1920ac",
+                   "src/vuln_agent/schemas.py":  "77f5bda84dd604ad24269aaf9ce496f2c8a8ec1bf7801f16b450dd970da23936",
+                   "src/vuln_agent/web_api/app.py":  "55fb507fa580cdc0dffaa1eb10ccf192418ac5304a421ff7019f5132a722fdfc",
+                   "src/vuln_agent/web_api/evaluation_reader.py":  "c8b271176e18d7e57b5c6fa91e6da24371978535d2696c77901e8c2310e5a6c9",
+                   "semgrep-rules/python":  "7aa50937bff2abe66a9c87b9783962e27afcd7a5d84bf2a257bfd55da49f58e5"
+               }
+}

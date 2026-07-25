@@ -10,6 +10,7 @@ from vuln_agent.evaluation import (
     live_prediction,
     per_cwe_metrics,
     pilot_sample_ids,
+    parse_full_file_analysis_for_evaluation,
     run_evaluation,
     stratified_sample_ids,
 )
@@ -145,6 +146,61 @@ def test_failure_records_include_prediction_errors():
     assert records[0].test_id == "x"
 
 
+def test_full_file_evaluation_parser_applies_scanner_validation_aliases_and_lists():
+    code = "sql = 'SELECT username FROM users WHERE password = ?'\ncur.execute(sql, (bar,))\n"
+    raw = json.dumps(
+        {
+            "verdict": "VULNERABLE",
+            "confidence": 1.0,
+            "normalized_cwe": "CWE-089",
+            "reasoning_summary": "SQL injection",
+            "source_evidence": "bar = request.args.get('case')",
+            "sink_evidence": "cur.execute(sql, (bar,))",
+            "data_flow_evidence": [{"line_start": 1, "line_end": 2}],
+            "sanitization_evidence": [],
+            "needs_more_context": False,
+        }
+    )
+
+    analysis, line_start, _line_end = parse_full_file_analysis_for_evaluation(raw, code)
+
+    assert analysis.verdict == Verdict.fp
+    assert analysis.normalized_cwe == "NONE"
+    assert "separate parameters" in analysis.reasoning_summary
+    assert "line_start" in analysis.data_flow_evidence
+    assert line_start == 2
+
+
+def test_full_file_evaluation_parser_does_not_treat_later_commas_as_sql_parameters():
+    code = "\n".join(
+        [
+            "bar = request.form.get('case')",
+            "sql = f\"SELECT username FROM USERS WHERE password = '{bar}'\"",
+            "cur.execute(sql)",
+            "helpers.db_sqlite.results(cur, sql)",
+        ]
+    )
+    raw = json.dumps(
+        {
+            "verdict": "TP",
+            "confidence": 1.0,
+            "normalized_cwe": "CWE-089",
+            "reasoning_summary": "SQL injection",
+            "source_evidence": "bar = request.form.get('case')",
+            "sink_evidence": "cur.execute(sql)",
+            "data_flow_evidence": "bar -> sql -> cur.execute(sql)",
+            "needs_more_context": False,
+        }
+    )
+
+    analysis, line_start, line_end = parse_full_file_analysis_for_evaluation(raw, code)
+
+    assert analysis.verdict == Verdict.tp
+    assert analysis.normalized_cwe == "CWE-089"
+    assert line_start == 3
+    assert line_end == 3
+
+
 def test_run_evaluation_writes_artifacts_without_placeholders(tmp_path: Path):
     truth_path = tmp_path / "ground_truth.json"
     truth_path.write_text(
@@ -253,6 +309,7 @@ def _hybrid_prediction(monkeypatch, tmp_path: Path, semgrep_findings, llm_result
 
     monkeypatch.setattr("vuln_agent.evaluation.scan_semgrep_capture", fake_semgrep)
     monkeypatch.setattr("vuln_agent.evaluation.generate_analysis_capture", fake_llm)
+    monkeypatch.setattr("vuln_agent.evaluation.generate_raw_capture", fake_llm)
     prediction = live_prediction(
         Settings(evaluation_dir=tmp_path / "eval"),
         tmp_path,
@@ -320,3 +377,60 @@ def test_hybrid_prompt_uses_source_code_without_semgrep_summary(monkeypatch, tmp
     assert "SOURCE_CODE_BEGIN" in prompts[0]
     assert "os.system(cmd)" in prompts[0]
     assert "Normalized Semgrep findings JSON" not in prompts[0]
+
+
+def test_evaluation_plan_b_development_labels_match_scanner_validation(monkeypatch, tmp_path: Path):
+    cases = {
+        "BenchmarkTest00268": {
+            "code": 'param = request.form.get("case")\nbar = "safe"\nbar = param\nsubprocess.run(f"echo {bar}", shell=True)\n',
+            "truth": {"vulnerable": True, "cwe": "CWE-078"},
+            "semgrep": [SemgrepFinding(finding_id="sg-cmdi", relative_file="BenchmarkTest00268.py", line_start=4, line_end=4, rule_id="python.subprocess.run", raw_semgrep_cwes=["CWE-078"], normalized_cwe="CWE-078", severity=Severity.high, snippet="subprocess.run(...)")],
+            "raw": {"verdict": "TP", "confidence": 1.0, "normalized_cwe": "CWE-078", "reasoning_summary": "command injection", "source_evidence": "param = request.form.get('case')", "sink_evidence": "subprocess.run(f'echo {bar}', shell=True)", "data_flow_evidence": "param -> bar -> subprocess.run", "needs_more_context": False},
+        },
+        "BenchmarkTest00350": {
+            "code": 'param = request.form.get("case")\nchoices = {"user": param, "safe": "status"}\nbar = choices["user"]\nbar = choices["safe"]\nsubprocess.run(f"echo {bar}", shell=True)\n',
+            "truth": {"vulnerable": False, "cwe": "CWE-078"},
+            "semgrep": [],
+            "raw": {"verdict": "VULNERABLE", "confidence": 1.0, "normalized_cwe": "CWE-078", "reasoning_summary": "command injection", "source_evidence": "param = request.form.get('case')", "sink_evidence": "subprocess.run(f'echo {bar}', shell=True)", "data_flow_evidence": "param -> choices['user'] -> bar -> subprocess.run", "needs_more_context": False},
+        },
+        "BenchmarkTest00099": {
+            "code": 'param = request.form.get("case")\nbar = param\nsql = f"SELECT username FROM users WHERE password = \'{bar}\'"\ncur.execute(sql)\n',
+            "truth": {"vulnerable": True, "cwe": "CWE-089"},
+            "semgrep": [SemgrepFinding(finding_id="sg-sqli", relative_file="BenchmarkTest00099.py", line_start=4, line_end=4, rule_id="python.sql.injection", raw_semgrep_cwes=["CWE-089"], normalized_cwe="CWE-089", severity=Severity.high, snippet="cur.execute(sql)")],
+            "raw": {"verdict": "TP", "confidence": 1.0, "normalized_cwe": "CWE-089", "reasoning_summary": "SQL injection", "source_evidence": "param = request.form.get('case')", "sink_evidence": "cur.execute(sql)", "data_flow_evidence": "param -> bar -> sql -> cur.execute", "needs_more_context": False},
+        },
+        "BenchmarkTest00755": {
+            "code": 'param = request.args.get("case")\nsql = "SELECT username FROM users WHERE password = ?"\ncur.execute(sql, (param,))\n',
+            "truth": {"vulnerable": False, "cwe": "CWE-089"},
+            "semgrep": [],
+            "raw": {"verdict": "VULNERABLE", "confidence": 1.0, "normalized_cwe": "CWE-089", "reasoning_summary": "SQL injection", "source_evidence": "param = request.args.get('case')", "sink_evidence": "cur.execute(sql, (param,))", "data_flow_evidence": [{"line_start": 1, "line_end": 3}], "needs_more_context": False},
+        },
+    }
+    for test_id, case in cases.items():
+        path = tmp_path / "data" / "BenchmarkPython" / "testcode" / f"{test_id}.py"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(case["code"], encoding="utf-8")
+
+    def fake_semgrep(settings, file_path, raw_dir, test_id):
+        return cases[test_id]["semgrep"], None, None
+
+    def fake_raw(settings, prompt):
+        test_id = next(case_id for case_id in cases if case_id in prompt)
+        raw = json.dumps(cases[test_id]["raw"])
+        return LLMResult(parsed=AgentAnalysis(verdict=Verdict.uncertain, confidence=0.0, normalized_cwe="NONE", reasoning_summary="raw"), raw_text=raw, metadata=ModelMetadata(model="fake"), latency_ms=1)
+
+    monkeypatch.setattr("vuln_agent.evaluation.scan_semgrep_capture", fake_semgrep)
+    monkeypatch.setattr("vuln_agent.evaluation.generate_raw_capture", fake_raw)
+
+    expected = {
+        "BenchmarkTest00268": True,
+        "BenchmarkTest00350": False,
+        "BenchmarkTest00099": True,
+        "BenchmarkTest00755": False,
+    }
+    for mode in ("llm", "hybrid"):
+        labels = {
+            test_id: live_prediction(Settings(evaluation_dir=tmp_path / "eval"), tmp_path, test_id, case["truth"], mode).predicted_vulnerable
+            for test_id, case in cases.items()
+        }
+        assert labels == expected

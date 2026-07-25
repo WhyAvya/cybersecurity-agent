@@ -19,6 +19,7 @@ class Settings(BaseModel):
     artifact_root: Path = Path("artifacts")
     report_dir: Path = Path("artifacts/reports")
     evaluation_dir: Path = Path("artifacts/evaluation")
+    evaluation_run_path: Path | None = None
     ground_truth_path: Path = Path("evaluation/ground_truth.json")
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5-coder:7b"

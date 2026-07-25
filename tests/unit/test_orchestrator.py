@@ -618,6 +618,26 @@ def test_plan_b_validation_rejects_parameterized_sqli_claim():
     assert "separate parameters" in checked.reasoning_summary
 
 
+def test_plan_b_validation_allows_unparameterized_sqli_execute():
+    code = "bar = request.form.get('case')\nsql = f\"SELECT * FROM users WHERE password = '{bar}'\"\ncur.execute(sql)\n"
+    item = FileFinding(
+        line_start=3,
+        line_end=3,
+        verdict=Verdict.tp,
+        confidence=1.0,
+        normalized_cwe="CWE-089",
+        source_evidence="bar = request.form.get('case')",
+        sink_evidence="cur.execute(sql)",
+        data_flow_evidence="bar -> sql -> cur.execute(sql)",
+        reasoning_summary="Use parameterized queries or prepared statements to prevent SQL injection.",
+    )
+
+    checked = validate_plan_b_file_finding(item, code)
+
+    assert checked.verdict == Verdict.tp
+    assert checked.normalized_cwe == "CWE-089"
+
+
 def test_plan_b_validation_rejects_simple_constant_overwrite_before_sink():
     code = (
         'param = request.form.get("case")\n'
