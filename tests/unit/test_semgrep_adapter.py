@@ -64,6 +64,28 @@ def test_semgrep_parses_and_deduplicates(monkeypatch):
     assert kwargs["timeout"] == Settings().semgrep_timeout_seconds
 
 
+def test_semgrep_can_use_target_as_project_root_with_experimental_flag(monkeypatch, tmp_path):
+    monkeypatch.setattr("shutil.which", lambda _: "semgrep")
+    target = tmp_path / "target"
+    target.mkdir()
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"results": []}), stderr="")
+
+    SemgrepAdapter(
+        Settings(semgrep_no_git_ignore=True),
+        runner=runner,
+        use_target_as_project_root=True,
+    ).scan(target)
+
+    command = calls[0]
+    assert command[1:4] == ["--experimental", "--project-root", str(target.resolve())]
+    assert "--no-git-ignore" in command
+    assert command[-1] == str(target)
+
+
 def test_semgrep_accepts_valid_json_with_return_code_one(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: "semgrep")
 

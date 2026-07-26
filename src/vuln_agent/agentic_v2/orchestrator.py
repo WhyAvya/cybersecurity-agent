@@ -53,7 +53,8 @@ class AgenticV2Orchestrator:
         artifacts: AgenticArtifactManager | None = None,
     ) -> None:
         self.settings = settings or Settings()
-        self.semgrep = semgrep or SemgrepAdapter(self.settings)
+        agentic_semgrep_settings = self.settings.model_copy(update={"semgrep_no_git_ignore": True})
+        self.semgrep = semgrep or SemgrepAdapter(agentic_semgrep_settings, use_target_as_project_root=True)
         self.llm = llm or OllamaClient(self.settings)
         self.artifacts = artifacts or AgenticArtifactManager(self.settings.artifact_root / "agentic-runs")
         self.max_candidates = 20

@@ -1,16 +1,20 @@
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 from vuln_agent.agentic_v2.artifacts import AgenticArtifactManager
 from vuln_agent.agentic_v2.models import ReasonerDecision
 from vuln_agent.agentic_v2.orchestrator import (
     AgenticV2Orchestrator,
+    _normalize_candidates,
     extract_candidate_context,
     terminal_from_review,
     validate_reasoner_decision,
 )
 from vuln_agent.agentic_v2.models import ReviewerDecision, ReviewerVerdict, TerminalState, ValidatorDecision
+from vuln_agent.config import Settings
+from vuln_agent.semgrep import SemgrepAdapter
 from vuln_agent.schemas import ModelMetadata, SemgrepFinding, Severity, ToolMetadata
 
 
@@ -108,6 +112,47 @@ def test_orchestrator_calls_existing_semgrep_and_inventory_drives_routing(tmp_pa
     plan = json.loads((result.run_dir / "scan_plan.json").read_text(encoding="utf-8"))
     assert plan["active_cwes"] == ["CWE-078"]
     assert plan["skipped_cwes"] == {"CWE-089": "no SQL or database indicators found"}
+
+
+def test_agentic_v2_uses_target_as_semgrep_project_root_without_changing_defaults():
+    orchestrator = AgenticV2Orchestrator()
+
+    assert Settings().semgrep_no_git_ignore is False
+    assert orchestrator.settings.semgrep_no_git_ignore is False
+    assert orchestrator.semgrep.use_target_as_project_root is True
+    assert orchestrator.semgrep.settings.semgrep_no_git_ignore is True
+
+
+def test_normalization_keeps_active_cwe_findings_without_fixture_specific_filters():
+    findings = [_finding(2, "CWE-078"), _finding(1, "CWE-089"), _finding(0, "CWE-022")]
+
+    candidates = _normalize_candidates(findings, ["CWE-089"], max_candidates=20)
+
+    assert [candidate.proposed_cwe for candidate in candidates] == ["CWE-089"]
+    assert candidates[0].candidate_id == "finding-01"
+
+
+def test_agentic_v2_semgrep_root_is_exact_supplied_target(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr("shutil.which", lambda _: "semgrep")
+    parent = tmp_path / "parent"
+    target = parent / "selected"
+    target.mkdir(parents=True)
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"results": []}), stderr="")
+
+    adapter = SemgrepAdapter(
+        Settings(semgrep_no_git_ignore=True),
+        runner=runner,
+        use_target_as_project_root=True,
+    )
+    adapter.scan(target)
+
+    command = calls[0]
+    assert command[command.index("--project-root") + 1] == str(target.resolve())
+    assert command[-1] == str(target)
 
 
 def test_cli_approval_decision_is_recorded(tmp_path: Path):

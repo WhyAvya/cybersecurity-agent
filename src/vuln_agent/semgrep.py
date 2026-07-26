@@ -22,9 +22,16 @@ CompletedProcessFactory = Callable[..., subprocess.CompletedProcess[str]]
 
 
 class SemgrepAdapter:
-    def __init__(self, settings: Settings, runner: CompletedProcessFactory | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        runner: CompletedProcessFactory | None = None,
+        *,
+        use_target_as_project_root: bool = False,
+    ) -> None:
         self.settings = settings
         self.runner = runner or subprocess.run
+        self.use_target_as_project_root = use_target_as_project_root
 
     def executable_path(self) -> str | None:
         found = shutil.which(self.settings.semgrep_binary)
@@ -80,8 +87,12 @@ class SemgrepAdapter:
             resolved_config,
             str(target_path),
         ]
+        extra_flags = []
+        if self.use_target_as_project_root:
+            extra_flags.extend(["--experimental", "--project-root", str(Path(target_path).resolve())])
         if self.settings.semgrep_no_git_ignore:
-            command.insert(2, "--no-git-ignore")
+            extra_flags.append("--no-git-ignore")
+        command[1:1] = extra_flags
 
         started = time.perf_counter()
         try:
