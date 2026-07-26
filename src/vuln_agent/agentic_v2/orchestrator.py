@@ -293,33 +293,33 @@ class AgenticV2Orchestrator:
 
     def _reason(self, candidate: CandidateFinding, payload: dict[str, Any]) -> ReasonerDecision | ValidatorDecision:
         prompt = _build_reasoner_prompt(payload)
-        try:
-            return _generate_reasoner(self.llm, prompt)
-        except SchemaParseError:
-            repair_prompt = f"{REASONER_SYSTEM_PROMPT}\nRepair this response into valid ReasonerDecision JSON only."
-            try:
-                return _generate_reasoner(self.llm, repair_prompt)
-            except SchemaParseError:
-                return ValidatorDecision(
-                    candidate_id=candidate.candidate_id,
-                    terminal_state=TerminalState.tool_error,
-                    reason="Reasoner returned malformed JSON after one repair attempt.",
-                )
+        reasoner, raw_response, validation_error = _try_generate_reasoner(self.llm, prompt)
+        if reasoner is not None:
+            return reasoner
+        repair_prompt = _build_reasoner_repair_prompt(candidate, raw_response, validation_error)
+        repaired, _repair_raw, _repair_error = _try_generate_reasoner(self.llm, repair_prompt)
+        if repaired is not None:
+            return repaired
+        return ValidatorDecision(
+            candidate_id=candidate.candidate_id,
+            terminal_state=TerminalState.tool_error,
+            reason="Reasoner returned malformed JSON after one repair attempt.",
+        )
 
     def _review(self, candidate: CandidateFinding, payload: dict[str, Any]) -> ReviewerDecision | ValidatorDecision:
         prompt = _build_reviewer_prompt(payload)
-        try:
-            return _generate_reviewer(self.llm, prompt)
-        except SchemaParseError:
-            repair_prompt = f"{REVIEWER_SYSTEM_PROMPT}\nRepair this response into valid ReviewerDecision JSON only."
-            try:
-                return _generate_reviewer(self.llm, repair_prompt)
-            except SchemaParseError:
-                return ValidatorDecision(
-                    candidate_id=candidate.candidate_id,
-                    terminal_state=TerminalState.tool_error,
-                    reason="Reviewer returned malformed JSON after one repair attempt.",
-                )
+        reviewer, raw_response, validation_error = _try_generate_reviewer(self.llm, prompt)
+        if reviewer is not None:
+            return reviewer
+        repair_prompt = _build_reviewer_repair_prompt(candidate, raw_response, validation_error)
+        repaired, _repair_raw, _repair_error = _try_generate_reviewer(self.llm, repair_prompt)
+        if repaired is not None:
+            return repaired
+        return ValidatorDecision(
+            candidate_id=candidate.candidate_id,
+            terminal_state=TerminalState.tool_error,
+            reason="Reviewer returned malformed JSON after one repair attempt.",
+        )
 
 
 def run_from_args(args: argparse.Namespace) -> int:
@@ -457,11 +457,87 @@ def _reviewer_payload(
 
 
 def _build_reasoner_prompt(payload: dict[str, Any]) -> str:
-    return REASONER_SYSTEM_PROMPT + "\n" + json.dumps(payload, indent=2, sort_keys=True)
+    return (
+        REASONER_SYSTEM_PROMPT
+        + "\n"
+        + _reasoner_output_contract(payload["candidate"]["candidate_id"], payload["candidate"]["candidate_cwe"])
+        + "\nInput payload:\n"
+        + json.dumps(payload, indent=2, sort_keys=True)
+    )
+
+
+def _build_reasoner_repair_prompt(candidate: CandidateFinding, raw_response: str, validation_error: str) -> str:
+    return (
+        REASONER_SYSTEM_PROMPT
+        + "\nRepair the original response into valid ReasonerDecision JSON only.\n"
+        + _reasoner_output_contract(candidate.candidate_id, candidate.proposed_cwe)
+        + "\nValidation error:\n"
+        + validation_error
+        + "\nOriginal raw response:\n"
+        + raw_response
+    )
+
+
+def _reasoner_output_contract(candidate_id: str, proposed_cwe: str) -> str:
+    template = {
+        "candidate_id": candidate_id,
+        "proposed_cwe": proposed_cwe,
+        "source_supported": False,
+        "propagation_supported": False,
+        "sink_supported": False,
+        "sanitization_summary": "",
+        "confidence": 0.0,
+        "missing_evidence": [],
+        "rationale": "",
+    }
+    return (
+        "Return exactly one JSON object. Do not include Markdown fences or prose. "
+        "Copy candidate_id and proposed_cwe unchanged from this template. "
+        "Use booleans for supported fields, a number from 0.0 to 1.0 for confidence, "
+        "and missing_evidence as list[str]. Use only supplied evidence; do not invent evidence. "
+        "Required ReasonerDecision template:\n"
+        + json.dumps(template, indent=2, sort_keys=True)
+    )
 
 
 def _build_reviewer_prompt(payload: dict[str, Any]) -> str:
-    return REVIEWER_SYSTEM_PROMPT + "\n" + json.dumps(payload, indent=2, sort_keys=True)
+    return (
+        REVIEWER_SYSTEM_PROMPT
+        + "\n"
+        + _reviewer_output_contract(payload["candidate"]["candidate_id"])
+        + "\nInput payload:\n"
+        + json.dumps(payload, indent=2, sort_keys=True)
+    )
+
+
+def _build_reviewer_repair_prompt(candidate: CandidateFinding, raw_response: str, validation_error: str) -> str:
+    return (
+        REVIEWER_SYSTEM_PROMPT
+        + "\nRepair the original response into valid ReviewerDecision JSON only.\n"
+        + _reviewer_output_contract(candidate.candidate_id)
+        + "\nValidation error:\n"
+        + validation_error
+        + "\nOriginal raw response:\n"
+        + raw_response
+    )
+
+
+def _reviewer_output_contract(candidate_id: str) -> str:
+    template = {
+        "candidate_id": candidate_id,
+        "decision": "human_review",
+        "follow_up_action": "none",
+        "rationale": "",
+    }
+    return (
+        "Return exactly one JSON object. Do not include Markdown fences or prose. "
+        "Copy candidate_id unchanged from this template. "
+        "decision must be one of: accept, reject, needs_more_evidence, human_review. "
+        "follow_up_action must be one of: more_context, assignment_history, none. "
+        "Use only supplied evidence; do not invent evidence or force a verdict. "
+        "Required ReviewerDecision template:\n"
+        + json.dumps(template, indent=2, sort_keys=True)
+    )
 
 
 def _generate_reasoner(llm: LLMClient, prompt: str) -> ReasonerDecision:
@@ -472,12 +548,40 @@ def _generate_reasoner(llm: LLMClient, prompt: str) -> ReasonerDecision:
     return ReasonerDecision.model_validate(result.parsed.model_dump())
 
 
+def _try_generate_reasoner(llm: LLMClient, prompt: str) -> tuple[ReasonerDecision | None, str, str]:
+    if hasattr(llm, "generate_raw"):
+        result = llm.generate_raw(prompt)  # type: ignore[attr-defined]
+        try:
+            return ReasonerDecision.model_validate(parse_model_json(result.raw_text, ReasonerDecision).model_dump()), result.raw_text, ""
+        except SchemaParseError as exc:
+            return None, result.raw_text, str(exc)
+    try:
+        result = llm.generate_structured(prompt, ReasonerDecision)
+        return ReasonerDecision.model_validate(result.parsed.model_dump()), result.raw_text, ""
+    except SchemaParseError as exc:
+        return None, "", str(exc)
+
+
 def _generate_reviewer(llm: LLMClient, prompt: str) -> ReviewerDecision:
     if hasattr(llm, "generate_raw"):
         result = llm.generate_raw(prompt)  # type: ignore[attr-defined]
         return ReviewerDecision.model_validate(parse_model_json(result.raw_text, ReviewerDecision).model_dump())
     result = llm.generate_structured(prompt, ReviewerDecision)
     return ReviewerDecision.model_validate(result.parsed.model_dump())
+
+
+def _try_generate_reviewer(llm: LLMClient, prompt: str) -> tuple[ReviewerDecision | None, str, str]:
+    if hasattr(llm, "generate_raw"):
+        result = llm.generate_raw(prompt)  # type: ignore[attr-defined]
+        try:
+            return ReviewerDecision.model_validate(parse_model_json(result.raw_text, ReviewerDecision).model_dump()), result.raw_text, ""
+        except SchemaParseError as exc:
+            return None, result.raw_text, str(exc)
+    try:
+        result = llm.generate_structured(prompt, ReviewerDecision)
+        return ReviewerDecision.model_validate(result.parsed.model_dump()), result.raw_text, ""
+    except SchemaParseError as exc:
+        return None, "", str(exc)
 
 
 def validate_reasoner_decision(
@@ -521,15 +625,62 @@ def terminal_from_review(
 ) -> ValidatorDecision:
     if validator.terminal_state is TerminalState.out_of_scope:
         return validator
-    if reviewer.decision is ReviewerVerdict.accept and validator.terminal_state is TerminalState.confirmed:
-        return ValidatorDecision(candidate_id=candidate.candidate_id, terminal_state=TerminalState.confirmed, reason="reviewer accepted and validator passed")
+    if validator.terminal_state is TerminalState.confirmed and reviewer.decision is ReviewerVerdict.accept:
+        return ValidatorDecision(
+            candidate_id=candidate.candidate_id,
+            terminal_state=TerminalState.confirmed,
+            reason="reviewer accepted and validator passed",
+            confidence=validator.confidence,
+        )
     if reviewer.decision is ReviewerVerdict.reject:
-        return ValidatorDecision(candidate_id=candidate.candidate_id, terminal_state=TerminalState.rejected, reason=reviewer.rationale)
+        if validator.terminal_state is TerminalState.confirmed and not _reviewer_reject_has_contradictory_evidence(reviewer.rationale):
+            return ValidatorDecision(
+                candidate_id=candidate.candidate_id,
+                terminal_state=TerminalState.confirmed,
+                reason="reviewer rejection did not provide contradictory safety evidence; deterministic validation remains confirmed",
+                confidence=validator.confidence,
+            )
+        return ValidatorDecision(
+            candidate_id=candidate.candidate_id,
+            terminal_state=TerminalState.rejected,
+            reason=reviewer.rationale,
+            confidence=validator.confidence if validator.terminal_state is TerminalState.confirmed else reviewer_confidence_floor(validator),
+        )
     if reviewer.decision is ReviewerVerdict.human_review:
         return ValidatorDecision(candidate_id=candidate.candidate_id, terminal_state=TerminalState.human_review_required, reason=reviewer.rationale)
     if reviewer.decision is ReviewerVerdict.needs_more_evidence:
         return ValidatorDecision(candidate_id=candidate.candidate_id, terminal_state=TerminalState.human_review_required, reason=reviewer.rationale)
     return ValidatorDecision(candidate_id=candidate.candidate_id, terminal_state=TerminalState.rejected, reason=validator.reason)
+
+
+def reviewer_confidence_floor(validator: ValidatorDecision) -> float:
+    return validator.confidence if validator.confidence else 0.0
+
+
+def _reviewer_reject_has_contradictory_evidence(rationale: str) -> bool:
+    text = rationale.lower()
+    contradiction_terms = (
+        "parameterized",
+        "bound parameter",
+        "placeholder",
+        "prepared statement",
+        "sanitized",
+        "escaped",
+        "validated",
+        "constant overwrite",
+        "overwritten",
+        "no user-controlled",
+        "not user-controlled",
+        "no source",
+        "no propagation",
+        "no flow",
+        "no sink",
+        "safe",
+        "allowlist",
+        "shell=false",
+    )
+    vulnerability_terms = ("without sanitization", "no sanitization", "directly executes", "sql injection", "vulnerab")
+    return any(term in text for term in contradiction_terms) and not any(term in text for term in vulnerability_terms)
 
 
 def _prompt_for_approval(route_payload: dict[str, Any], input_func) -> bool:

@@ -638,6 +638,140 @@ def test_plan_b_validation_allows_unparameterized_sqli_execute():
     assert checked.normalized_cwe == "CWE-089"
 
 
+def test_plan_b_validation_does_not_treat_single_dynamic_sql_argument_as_parameterized():
+    code = "\n".join(
+        [
+            "name = request.args.get('name')",
+            "query = f\"SELECT * FROM users WHERE name = '{name}'\"",
+            "cursor.execute(query)",
+        ]
+    )
+    item = FileFinding(
+        line_start=3,
+        line_end=3,
+        verdict=Verdict.tp,
+        confidence=0.8,
+        normalized_cwe="CWE-089",
+        source_evidence="name = request.args.get('name')",
+        sink_evidence="cursor.execute(query)",
+        data_flow_evidence="name -> query -> cursor.execute(query)",
+        reasoning_summary="SQL injection",
+    )
+
+    checked = validate_plan_b_file_finding(item, code)
+
+    assert checked.verdict == Verdict.tp
+    assert checked.normalized_cwe == "CWE-089"
+
+
+def test_plan_b_validation_ignores_evidence_commas_when_checking_sql_parameters():
+    code = "\n".join(
+        [
+            "name = request.args.get('name')",
+            "query = f\"SELECT * FROM users WHERE name = '{name}'\"",
+            "cursor.execute(query)",
+        ]
+    )
+    item = FileFinding(
+        line_start=3,
+        line_end=3,
+        verdict=Verdict.tp,
+        confidence=0.8,
+        normalized_cwe="CWE-089",
+        source_evidence="source evidence",
+        sink_evidence=code,
+        data_flow_evidence="source reaches sink",
+        reasoning_summary="request name flows into string-built query and cursor.execute(query)",
+    )
+
+    checked = validate_plan_b_file_finding(item, code)
+
+    assert checked.verdict == Verdict.tp
+    assert checked.normalized_cwe == "CWE-089"
+
+
+def test_plan_b_validation_recognizes_percent_placeholder_bound_parameters():
+    code = "sql = 'SELECT * FROM users WHERE name = %s'\ncursor.execute(sql, (name,))"
+    item = FileFinding(
+        line_start=2,
+        line_end=2,
+        verdict=Verdict.tp,
+        confidence=0.9,
+        normalized_cwe="CWE-089",
+        source_evidence="name = request.args.get('name')",
+        sink_evidence="cursor.execute(sql, (name,))",
+        data_flow_evidence="name -> sql query parameter",
+        reasoning_summary="SQL injection",
+    )
+
+    checked = validate_plan_b_file_finding(item, code)
+
+    assert checked.verdict == Verdict.fp
+    assert checked.normalized_cwe == "NONE"
+    assert "separate parameters" in checked.reasoning_summary
+
+
+def test_plan_b_validation_recognizes_parameterized_execute_in_sink_evidence():
+    code = "cur.execute(sql, (bar,))"
+    item = FileFinding(
+        line_start=1,
+        line_end=1,
+        verdict=Verdict.tp,
+        confidence=0.9,
+        normalized_cwe="CWE-089",
+        source_evidence="bar = request.args.get('name')",
+        sink_evidence="cur.execute(sql, (bar,))",
+        data_flow_evidence="reported flow",
+        reasoning_summary="SQL injection",
+    )
+
+    checked = validate_plan_b_file_finding(item, code)
+
+    assert checked.verdict == Verdict.fp
+    assert "separate parameters" in checked.reasoning_summary
+
+
+def test_plan_b_validation_does_not_treat_placeholder_without_bound_args_as_safe():
+    code = 'sql = "SELECT * FROM users WHERE name = ?"\ncur.execute(sql)'
+    item = FileFinding(
+        line_start=2,
+        line_end=2,
+        verdict=Verdict.tp,
+        confidence=0.9,
+        normalized_cwe="CWE-089",
+        source_evidence="name = request.args.get('name')",
+        sink_evidence="cur.execute(sql)",
+        data_flow_evidence="name -> sql -> cur.execute(sql)",
+        reasoning_summary="SQL injection",
+    )
+
+    checked = validate_plan_b_file_finding(item, code)
+
+    assert checked.verdict == Verdict.fp
+    assert "separate parameters" not in checked.reasoning_summary
+
+
+def test_plan_b_validation_rejects_constant_safe_sql_claim():
+    code = "name = request.args.get('name')\nquery = 'SELECT * FROM users'\ncursor.execute(query)"
+    item = FileFinding(
+        line_start=3,
+        line_end=3,
+        verdict=Verdict.tp,
+        confidence=0.9,
+        normalized_cwe="CWE-089",
+        source_evidence="name = request.args.get('name')",
+        sink_evidence="cursor.execute(query)",
+        data_flow_evidence="name -> query -> cursor.execute(query)",
+        reasoning_summary="SQL injection",
+    )
+
+    checked = validate_plan_b_file_finding(item, code)
+
+    assert checked.verdict == Verdict.fp
+    assert checked.normalized_cwe == "NONE"
+    assert "constant" in checked.reasoning_summary
+
+
 def test_plan_b_validation_rejects_simple_constant_overwrite_before_sink():
     code = (
         'param = request.form.get("case")\n'

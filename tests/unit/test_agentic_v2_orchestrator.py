@@ -3,19 +3,25 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from vuln_agent.agentic_v2.artifacts import AgenticArtifactManager
 from vuln_agent.agentic_v2.models import ReasonerDecision
 from vuln_agent.agentic_v2.orchestrator import (
     AgenticV2Orchestrator,
     _normalize_candidates,
+    _reasoner_output_contract,
+    _reviewer_output_contract,
     extract_candidate_context,
     terminal_from_review,
     validate_reasoner_decision,
 )
 from vuln_agent.agentic_v2.models import ReviewerDecision, ReviewerVerdict, TerminalState, ValidatorDecision
 from vuln_agent.config import Settings
+from vuln_agent.exceptions import SchemaParseError
 from vuln_agent.semgrep import SemgrepAdapter
 from vuln_agent.schemas import ModelMetadata, SemgrepFinding, Severity, ToolMetadata
+from vuln_agent.utils import parse_model_json
 
 
 class RawResult:
@@ -212,6 +218,78 @@ def test_malformed_json_gets_one_repair_attempt(tmp_path: Path):
     assert result.decisions[0].terminal_state is TerminalState.confirmed
 
 
+def test_reasoner_payload_echo_repairs_with_raw_response_and_error(tmp_path: Path):
+    repo = _repo(tmp_path)
+    echoed_payload = json.dumps(
+        {
+            "candidate": {"candidate_id": "finding-00", "candidate_cwe": "CWE-078"},
+            "context": {},
+        }
+    )
+    repaired = _decision("finding-00", "CWE-078")
+    llm = FakeLLM([echoed_payload, repaired, _review()])
+
+    result = AgenticV2Orchestrator(
+        semgrep=FakeSemgrep([_finding(0)]),
+        llm=llm,
+        artifacts=AgenticArtifactManager(tmp_path / "runs"),
+    ).run(repo, ["CWE-078"], auto_approve=True)
+
+    repair_prompt = llm.prompts[1]
+    assert result.decisions[0].terminal_state is TerminalState.confirmed
+    assert echoed_payload in repair_prompt
+    assert "Field required" in repair_prompt
+    assert "finding-00" in repair_prompt
+    assert '"proposed_cwe": "CWE-078"' in repair_prompt
+
+
+def test_reasoner_missing_evidence_string_fails_but_repaired_list_passes(tmp_path: Path):
+    repo = _repo(tmp_path)
+    invalid = json.dumps(
+        {
+            "candidate_id": "finding-00",
+            "proposed_cwe": "CWE-078",
+            "source_supported": True,
+            "propagation_supported": True,
+            "sink_supported": True,
+            "missing_evidence": "none",
+        }
+    )
+    repaired = _decision("finding-00", "CWE-078")
+    llm = FakeLLM([invalid, repaired, _review()])
+
+    with pytest.raises(SchemaParseError):
+        parse_model_json(invalid, ReasonerDecision)
+    result = AgenticV2Orchestrator(
+        semgrep=FakeSemgrep([_finding(0)]),
+        llm=llm,
+        artifacts=AgenticArtifactManager(tmp_path / "runs"),
+    ).run(repo, ["CWE-078"], auto_approve=True)
+
+    assert "Input should be a valid list" in llm.prompts[1]
+    assert result.decisions[0].terminal_state is TerminalState.confirmed
+
+
+def test_reasoner_failed_repair_still_returns_tool_error(tmp_path: Path):
+    repo = _repo(tmp_path)
+    llm = FakeLLM([json.dumps({"candidate": {}}), json.dumps({"missing_evidence": "still wrong"})])
+
+    result = AgenticV2Orchestrator(
+        semgrep=FakeSemgrep([_finding(0)]),
+        llm=llm,
+        artifacts=AgenticArtifactManager(tmp_path / "runs"),
+    ).run(repo, ["CWE-078"], auto_approve=True)
+
+    assert len(llm.prompts) == 2
+    assert result.decisions[0].terminal_state is TerminalState.tool_error
+
+
+def test_reasoner_contract_has_no_fixture_names_expected_labels_or_forced_verdicts():
+    contract = _reasoner_output_contract("candidate-1", "CWE-089").lower()
+    for prohibited in ("cwe089_vulnerable", "expected_label", "expected_cwe", "ground_truth", "confirmed", "rejected"):
+        assert prohibited not in contract
+
+
 def test_second_malformed_response_becomes_tool_error(tmp_path: Path):
     repo = _repo(tmp_path)
     semgrep = FakeSemgrep([_finding(0)])
@@ -280,6 +358,54 @@ def test_existing_validator_is_reused_for_safe_shell_rejection(tmp_path: Path):
     assert "shell=False" in validator.reason or "command sink" in validator.reason
 
 
+def test_agentic_v2_validator_allows_single_dynamic_sql_argument():
+    source = (
+        "def search_users(cursor):\n"
+        "    name = request.args.get(\"name\")\n"
+        "    query = f\"SELECT * FROM users WHERE name = '{name}'\"\n"
+        "    cursor.execute(query)\n"
+    )
+    validator = validate_reasoner_decision(
+        candidate=type("Candidate", (), {"candidate_id": "c1", "line_start": 4, "line_end": 4, "proposed_cwe": "CWE-089"})(),
+        reasoner=ReasonerDecision(
+            candidate_id="c1",
+            proposed_cwe="CWE-089",
+            source_supported=True,
+            propagation_supported=True,
+            sink_supported=True,
+            confidence=0.8,
+            rationale="request name flows into string-built query and cursor.execute(query)",
+        ),
+        evidence={"source": source},
+    )
+
+    assert validator.terminal_state is TerminalState.confirmed
+    assert validator.reason == "deterministic validation passed"
+
+
+def test_agentic_v2_validator_rejects_bound_sql_parameters():
+    for source in (
+        'def search_users(cursor, name):\n    cursor.execute("SELECT * FROM users WHERE name = ?", (name,))\n',
+        'def search_users(cursor, name):\n    cursor.execute("SELECT * FROM users WHERE name = %s", (name,))\n',
+    ):
+        validator = validate_reasoner_decision(
+            candidate=type("Candidate", (), {"candidate_id": "c1", "line_start": 2, "line_end": 2, "proposed_cwe": "CWE-089"})(),
+            reasoner=ReasonerDecision(
+                candidate_id="c1",
+                proposed_cwe="CWE-089",
+                source_supported=True,
+                propagation_supported=True,
+                sink_supported=True,
+                confidence=0.8,
+                rationale="source reaches parameterized execute",
+            ),
+            evidence={"source": source},
+        )
+
+        assert validator.terminal_state is TerminalState.rejected
+        assert "separate parameters" in validator.reason
+
+
 def test_reviewer_prompt_payload_differs_from_reasoner_and_has_no_hidden_history(tmp_path: Path):
     repo = _repo(tmp_path)
     semgrep = FakeSemgrep([_finding(0)])
@@ -291,6 +417,48 @@ def test_reviewer_prompt_payload_differs_from_reasoner_and_has_no_hidden_history
     assert "skeptical reviewer" in llm.prompts[1]
     assert "hidden" not in llm.prompts[1].lower()
     assert "ground_truth" not in llm.prompts[1].lower()
+
+
+def test_reviewer_schema_invalid_response_repairs_with_raw_response_and_error(tmp_path: Path):
+    repo = _repo(tmp_path)
+    invalid = json.dumps({"candidate": {"candidate_id": "finding-00"}, "decision": "accept"})
+    repaired = _review("finding-00", decision="accept")
+    llm = FakeLLM([_decision(), invalid, repaired])
+
+    result = AgenticV2Orchestrator(
+        semgrep=FakeSemgrep([_finding(0)]),
+        llm=llm,
+        artifacts=AgenticArtifactManager(tmp_path / "runs"),
+    ).run(repo, ["CWE-078"], auto_approve=True)
+
+    repair_prompt = llm.prompts[2]
+    assert result.decisions[0].terminal_state is TerminalState.confirmed
+    assert invalid in repair_prompt
+    assert "Field required" in repair_prompt
+    assert '"candidate_id": "finding-00"' in repair_prompt
+    assert "Required ReviewerDecision template" in repair_prompt
+
+
+def test_reviewer_failed_repair_returns_tool_error(tmp_path: Path):
+    repo = _repo(tmp_path)
+    llm = FakeLLM([_decision(), json.dumps({"candidate": {}}), json.dumps({"decision": "maybe"})])
+
+    result = AgenticV2Orchestrator(
+        semgrep=FakeSemgrep([_finding(0)]),
+        llm=llm,
+        artifacts=AgenticArtifactManager(tmp_path / "runs"),
+    ).run(repo, ["CWE-078"], auto_approve=True)
+
+    assert len(llm.prompts) == 3
+    assert result.decisions[0].terminal_state is TerminalState.tool_error
+
+
+def test_reviewer_contract_is_isolated_from_reasoner_schema_and_forced_verdicts():
+    contract = _reviewer_output_contract("candidate-1").lower()
+    assert "reasonerdecision" not in contract
+    assert "source_supported" not in contract
+    for prohibited in ("cwe089_vulnerable", "expected_label", "expected_cwe", "ground_truth", "confirmed", "rejected"):
+        assert prohibited not in contract
 
 
 def test_two_pass_evidence_loop_and_no_third_pass(tmp_path: Path):
@@ -326,13 +494,34 @@ def test_llm_budget_stops_before_model_call(tmp_path: Path):
 
 def test_terminal_mapping():
     candidate = type("Candidate", (), {"candidate_id": "c1"})()
-    validator = ValidatorDecision(candidate_id="c1", terminal_state=TerminalState.confirmed)
-    assert terminal_from_review(
+    validator = ValidatorDecision(candidate_id="c1", terminal_state=TerminalState.confirmed, confidence=1.0)
+    accepted = terminal_from_review(
         candidate, validator, ReviewerDecision(candidate_id="c1", decision=ReviewerVerdict.accept)
-    ).terminal_state is TerminalState.confirmed
-    assert terminal_from_review(
-        candidate, validator, ReviewerDecision(candidate_id="c1", decision=ReviewerVerdict.reject)
-    ).terminal_state is TerminalState.rejected
+    )
+    assert accepted.terminal_state is TerminalState.confirmed
+    assert accepted.confidence == 1.0
+    kept = terminal_from_review(
+        candidate, validator, ReviewerDecision(candidate_id="c1", decision=ReviewerVerdict.human_review, rationale="keep for human review")
+    )
+    assert kept.terminal_state is TerminalState.human_review_required
+    contradicted = terminal_from_review(
+        candidate,
+        validator,
+        ReviewerDecision(candidate_id="c1", decision=ReviewerVerdict.reject, rationale="SQL uses parameterized placeholders with bound parameters."),
+    )
+    assert contradicted.terminal_state is TerminalState.rejected
+    assert contradicted.confidence == 1.0
+    unsupported_reject = terminal_from_review(
+        candidate,
+        validator,
+        ReviewerDecision(
+            candidate_id="c1",
+            decision=ReviewerVerdict.reject,
+            rationale="The query directly executes user input without sanitization and is vulnerable to SQL injection.",
+        ),
+    )
+    assert unsupported_reject.terminal_state is TerminalState.confirmed
+    assert "did not provide contradictory" in unsupported_reject.reason
 
 
 def _fixture_repo(name: str) -> Path:

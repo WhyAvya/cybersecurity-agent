@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ast
 import platform
 import re
 import subprocess
@@ -180,8 +181,10 @@ def validate_plan_b_file_finding(item: FileFinding, code: str) -> FileFinding:
     if cwe == "CWE-089":
         if not _has_sql_execution_sink(combined):
             reasons.append("no SQL execution sink supports CWE-089")
-        if _has_parameterized_execute(combined):
+        if _has_parameterized_execute(_sql_parameterization_fragments(item, code)):
             reasons.append("SQL execution uses separate parameters/placeholders")
+        if _has_constant_sql_execute(code):
+            reasons.append("SQL execution uses a constant query without user-controlled data")
         if _claimed_flow_has_constant_overwrite(item, code):
             reasons.append("claimed tainted value is overwritten by a constant before the SQL sink")
 
@@ -212,8 +215,123 @@ def _has_sql_execution_sink(text: str) -> bool:
     return bool(re.search(r"\.\s*execute\s*\(", text))
 
 
-def _has_parameterized_execute(text: str) -> bool:
-    return bool(re.search(r"\.\s*execute\s*\(\s*[^,\n]+,\s*[^)]", text))
+def _sql_parameterization_fragments(item: FileFinding, code: str) -> list[str]:
+    fragments = [code]
+    if ".execute" in item.sink_evidence:
+        fragments.append(item.sink_evidence)
+    return [fragment for fragment in fragments if fragment.strip()]
+
+
+def _has_parameterized_execute(text_or_fragments: str | list[str]) -> bool:
+    fragments = [text_or_fragments] if isinstance(text_or_fragments, str) else text_or_fragments
+    return any(_fragment_has_parameterized_execute(fragment) for fragment in fragments)
+
+
+def _fragment_has_parameterized_execute(text: str) -> bool:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return _has_parameterized_execute_call_text(text)
+    string_assignments: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            value = _static_sql_text(node.value)
+            if value is None:
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    string_assignments[target.id] = value
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr != "execute" or len(node.args) < 2:
+            continue
+        sql_text = _static_sql_text(node.args[0])
+        if sql_text is None and isinstance(node.args[0], ast.Name):
+            sql_text = string_assignments.get(node.args[0].id)
+        if sql_text and _has_sql_placeholder(sql_text):
+            return True
+        if sql_text is None and isinstance(node.args[0], ast.Name) and len(node.args) >= 2 and _fragment_is_execute_call_only(text):
+            return True
+    return False
+
+
+def _has_parameterized_execute_call_text(text: str) -> bool:
+    for snippet in _execute_call_snippets(text):
+        try:
+            tree = ast.parse(snippet)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr != "execute" or len(node.args) < 2:
+                continue
+            sql_text = _static_sql_text(node.args[0])
+            if sql_text is None and isinstance(node.args[0], ast.Name) and _fragment_is_execute_call_only(snippet):
+                return True
+            if sql_text and _has_sql_placeholder(sql_text):
+                return True
+    return False
+
+
+def _execute_call_snippets(text: str) -> list[str]:
+    snippets = []
+    for line in text.splitlines():
+        if ".execute" in line:
+            snippets.append(line.strip())
+    if ".execute" in text and "\n" not in text:
+        snippets.append(text.strip())
+    return snippets
+
+
+def _fragment_is_execute_call_only(text: str) -> bool:
+    stripped = text.strip()
+    return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_\.]*\s*\.\s*execute\s*\(.*\)", stripped, flags=re.DOTALL))
+
+
+def _static_sql_text(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        return "".join(part.value if isinstance(part, ast.Constant) and isinstance(part.value, str) else "{}" for part in node.values)
+    return None
+
+
+def _has_sql_placeholder(sql_text: str) -> bool:
+    return "?" in sql_text or bool(re.search(r"%s|%\([A-Za-z_][A-Za-z0-9_]*\)s", sql_text))
+
+
+def _has_constant_sql_execute(code: str) -> bool:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+    string_assignments: dict[str, str] = {}
+    dynamic_assignments: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        value = _static_sql_text(node.value)
+        for target in node.targets:
+            if not isinstance(target, ast.Name):
+                continue
+            if value is not None and "{}" not in value:
+                string_assignments[target.id] = value
+            else:
+                dynamic_assignments.add(target.id)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr != "execute" or len(node.args) != 1:
+            continue
+        argument = node.args[0]
+        sql_text = _static_sql_text(argument)
+        if sql_text is not None:
+            return "{}" not in sql_text
+        if isinstance(argument, ast.Name):
+            return argument.id in string_assignments and argument.id not in dynamic_assignments
+    return False
 
 
 def _claimed_flow_has_constant_overwrite(item: FileFinding, code: str) -> bool:
@@ -227,12 +345,12 @@ def _claimed_flow_has_constant_overwrite(item: FileFinding, code: str) -> bool:
         tainted_lines = [
             index
             for index, line in enumerate(lines, 1)
-            if re.search(rf"\b{re.escape(variable)}\s*=\s*.*(?:param|request\.|get_form_parameter|getlist|values\[[0-9]+\]|keyB|[\"']user[\"'])", line, re.IGNORECASE)
+            if re.search(rf"^\s*{re.escape(variable)}\s*=\s*.*(?:param|request\.|get_form_parameter|getlist|values\[[0-9]+\]|keyB|[\"']user[\"'])", line, re.IGNORECASE)
         ]
         constant_lines = [
             index
             for index, line in enumerate(lines, 1)
-            if re.search(rf"\b{re.escape(variable)}\s*=\s*(['\"][^'\"]*['\"]|\w+\[[\"'][^\"']*(?:keyA|safe)[^\"']*[\"']\])", line, re.IGNORECASE)
+            if re.search(rf"^\s*{re.escape(variable)}\s*=\s*(['\"][^'\"]*['\"]|\w+\[[\"'][^\"']*(?:keyA|safe)[^\"']*[\"']\])", line, re.IGNORECASE)
         ]
         if any(
             tainted_line < constant_line and (sink_line is None or constant_line < sink_line)
