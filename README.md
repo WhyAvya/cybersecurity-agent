@@ -187,6 +187,21 @@ Agentic v2 final decisions use terminal states such as:
 
 The safe case produced no candidate and no LLM call. The vulnerable case passed through the reasoner, validator, and reviewer, reached final terminal state `CONFIRMED`, and reported confidence `1.0`. This proves end-to-end MVP behavior, not large-scale Agentic v2 benchmark performance.
 
+## Plan A versus Plan B Hybrid Comparison
+
+This focused eight-case comparison showed improved Plan B Hybrid behavior over the Plan A Hybrid baseline. It is a small controlled comparison and should not be treated as a broad benchmark.
+
+| Workflow | Precision | Recall | F1 | Accuracy | FPR |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Plan A Hybrid | 0.500 | 0.900 | 0.643 | 0.500 | 0.900 |
+| Plan B Hybrid | 0.667 | 1.000 | 0.800 | 0.750 | 0.500 |
+| Observed change | +0.167 | +0.100 | +0.157 | +0.250 | -0.400 |
+
+Supporting materials:
+
+- [Plan B Final Report](docs/plan_b/PLAN_B_FINAL_REPORT.md)
+- [Plan B final evaluation artifact report](artifacts/evaluation/plan-b-final/20260725T073500Z-b7fc6d9f/reports/final_evaluation_report.md)
+
 ## Earlier Quantitative Evaluation
 
 These are frozen Plan B v1 / earlier evaluation results. The historical metrics below are preserved exactly.
