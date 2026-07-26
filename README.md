@@ -289,10 +289,8 @@ Use this project only for academic study, internship evaluation, defensive secur
 
 ## Author
 
-Your Full Name  
-Internship Project  
-Scientific Analysis Group  
-Defence Research and Development Organisation  
+**Avya Sharma**  
+AI Summer Intern, Scientific Analysis Group (SAG), DRDO  
 Metcalfe House, Delhi, India  
 Mentor: Dr. Pooja Yadav
 
